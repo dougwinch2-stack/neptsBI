@@ -126,7 +126,7 @@ a.big-num:hover { background: var(--surface-2); text-decoration: underline; }
 .van-hero .tile--soon .tile__value { font-size: var(--text-lg); }
 
 /* One action per row, all the same width so the column lines up */
-.action-btn { min-width: 9.5em; min-height: 40px; padding-block: var(--space-1); font-size: var(--text-sm); }
+.action-btn { min-width: 11em; min-height: 40px; padding-block: var(--space-1); font-size: var(--text-sm); }
 /* Quieter second action next to a main button */
 .link-btn {
   min-height: var(--touch);
