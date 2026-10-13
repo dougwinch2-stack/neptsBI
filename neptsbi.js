@@ -176,7 +176,9 @@
       db.from("mileage_weekly").select("*").order("week_start"),
       db.from("mileage_weekday").select("*"),
       db.from("vehicle_service").select("*"),
-      db.from("service_providers").select("*").eq("active", true).order("name")
+      db.from("service_providers").select("*").eq("active", true).order("name"),
+      // Passes only (for the compliance trend); far fewer than the 1,000-row limit
+      db.from("mot_tests").select("vehicle_id,test_date,expiry_date").eq("result", "Pass")
     ]);
     for (var i = 0; i < results.length; i++) if (results[i].error) throw results[i].error;
 
@@ -198,6 +200,7 @@
     var svc = new Map(results[10].data.map(function (r) { return [r.vehicle_id, r]; }));
     c.vehicles.forEach(function (v) { v.svc = svc.get(v.id) || { status: "OK", booked: false }; });
     c.providers = results[11].data;
+    c.passes = results[12].data;
     c.weekly = results[8].data;
     c.weekday = results[9].data;
     c.regionById = new Map(c.regions.map(function (r) { return [r.id, r]; }));
@@ -233,8 +236,7 @@
   function showWho(m) {
     var el = document.getElementById("who");
     if (!el || !m) return;
-    var where = m.person.base_id ? "" : "";
-    el.innerHTML = 'Signed in as <strong>' + esc(m.person.name) + "</strong>" + where;
+    el.innerHTML = '<strong>' + esc(m.person.name) + "</strong>";
     el.hidden = false;
   }
 
@@ -271,7 +273,119 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addMenuRows);
   else addMenuRows();
 
+  /* ---- Dates people type: 9/11/2027, 09/11/27, 9.11.2027, 9 11 2027, 9 Nov 2027 ----
+     Returns "2027-11-09", "" for empty, or null when it isn't a real date. */
+  var MONTH_WORDS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  function parseTyped(text) {
+    var t = String(text || "").trim().toLowerCase();
+    if (!t) return "";
+    var p = t.split(/[\s\/.\-,]+/).filter(Boolean);
+    if (p.length !== 3) return null;
+    var d = parseInt(p[0], 10), mo = parseInt(p[1], 10), y = parseInt(p[2], 10);
+    if (isNaN(mo)) mo = MONTH_WORDS.indexOf(p[1].slice(0, 3)) + 1;
+    if (!/^\d+$/.test(p[0]) || !/^\d+$/.test(p[2]) || !(mo >= 1 && mo <= 12)) return null;
+    if (p[2].length === 2) y += 2000;
+    if (p[2].length !== 2 && p[2].length !== 4) return null;
+    var dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  }
+  var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // "Tue 9 Nov 2027" (year left off when it's this year and short is set)
+  function fmtDay(s, short) {
+    var d = parseDate(s);
+    if (!d) return "–";
+    var yr = short && d.getFullYear() === new Date().getFullYear() ? "" : " " + d.getFullYear();
+    return DAY_NAMES[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()] + yr;
+  }
+  function toTyped(iso) { var d = parseDate(iso); return d ? String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear() : ""; }
+  function daysBetween(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 864e5); }
+
+  /* ---- Side panel: opens over the page, Esc or × closes, focus goes back ---- */
+  var openPanelEl = null;
+  function openPanel(title, opts) {
+    closePanel(true);
+    opts = opts || {};
+    var back = document.activeElement;
+    var scrim = document.createElement("div");
+    scrim.className = "panel-scrim";
+    var panel = document.createElement("aside");
+    panel.className = "panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", title);
+    panel.innerHTML = '<div class="panel__head"><h2>' + esc(title) + '</h2><span data-steps></span>' +
+      '<button type="button" class="panel__close" aria-label="Close">×</button></div><div class="panel__content"></div>';
+    panel.querySelector(".panel__content").style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0";
+    document.body.appendChild(scrim);
+    document.body.appendChild(panel);
+    document.body.classList.add("panel-open");
+    function close() { closePanel(); }
+    scrim.addEventListener("click", close);
+    panel.querySelector(".panel__close").addEventListener("click", close);
+    openPanelEl = { panel: panel, scrim: scrim, back: back, onClose: opts.onClose };
+    return { el: panel.querySelector(".panel__content"), head: panel.querySelector("[data-steps]"), close: close };
+  }
+  function closePanel(silent) {
+    if (!openPanelEl) return;
+    var o = openPanelEl;
+    openPanelEl = null;
+    o.panel.remove(); o.scrim.remove();
+    document.body.classList.remove("panel-open");
+    if (o.back && o.back.focus && document.contains(o.back)) o.back.focus();
+    if (!silent && o.onClose) o.onClose();
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && openPanelEl) {
+      // Esc inside an open type-ahead list closes the list first
+      if (e.target && e.target.getAttribute && e.target.getAttribute("aria-expanded") === "true") return;
+      e.preventDefault(); closePanel();
+    }
+    // Keep Tab inside the panel
+    if (e.key === "Tab" && openPanelEl) {
+      var f = openPanelEl.panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+      f = Array.prototype.filter.call(f, function (x) { return x.offsetParent !== null; });
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  /* ---- Line chart: one main series + an optional comparison (dashed) ---- */
+  function lineChart(series, opts) {
+    opts = opts || {};
+    var W = opts.width || 480, H = opts.height || 170, L = 44, B = 24, T = 10, R = 10;
+    var all = series.reduce(function (a, s) { return a.concat(s.values); }, []);
+    var lo = opts.min != null ? opts.min : Math.min.apply(null, all), hi = opts.max != null ? opts.max : Math.max.apply(null, all);
+    if (hi - lo < 1e-9) { hi = lo + 1; }
+    var n = series[0].values.length;
+    var x = function (i) { return L + (W - L - R) * (n === 1 ? 0.5 : i / (n - 1)); };
+    var y = function (v) { return T + (H - T - B) * (1 - (v - lo) / (hi - lo)); };
+    var out = '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(opts.ariaLabel || "") + '">';
+    [lo, (lo + hi) / 2, hi].forEach(function (v) {
+      out += '<line class="chart__grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>' +
+             '<text class="chart__axis" x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + esc(opts.fmt ? opts.fmt(v) : fmtNum(v)) + "</text>";
+    });
+    series.slice().reverse().forEach(function (s) {
+      out += '<polyline class="chart__line' + (s.cmp ? " chart__line--cmp" : "") + '" points="' +
+        s.values.map(function (v, i) { return x(i) + "," + y(v); }).join(" ") + '"/>';
+    });
+    var main = series[0].values;
+    out += '<circle class="chart__dot" r="4" cx="' + x(n - 1) + '" cy="' + y(main[n - 1]) + '"/>';
+    (opts.labels || []).forEach(function (lab, i) {
+      if (i % (opts.labelEvery || 1) === 0 || i === n - 1)
+        out += '<text class="chart__axis" x="' + x(i) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(lab) + "</text>";
+      var w = (W - L - R) / Math.max(n - 1, 1);
+      out += '<rect class="chart__hit" x="' + (x(i) - w / 2) + '" y="' + T + '" width="' + w + '" height="' + (H - T - B) +
+        '" data-tip="' + esc((opts.tips && opts.tips[i]) || lab) + '"/>';
+    });
+    return out + "</svg>";
+  }
+
   window.NB = {
+    parseTyped: parseTyped, fmtDay: fmtDay, toTyped: toTyped, daysBetween: daysBetween,
+    openPanel: openPanel, closePanel: closePanel, lineChart: lineChart,
     db: db, esc: esc, fmtDate: fmtDate, fmtDateTime: fmtDateTime, fmtNum: fmtNum, isoToday: isoToday,
     parseDate: parseDate, daysText: daysText, barChart: barChart, chartTable: chartTable, statusBadge: statusBadge, bookingBadge: bookingBadge,
     friendlyError: friendlyError, loadAll: loadAll, invalidate: invalidate,

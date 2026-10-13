@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
   <!-- ?v= makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=6">
-  <link rel="stylesheet" href="neptsbi.css?v=6">
-  <script src="dougs.js?v=6"></script>
+  <link rel="stylesheet" href="dougs.css?v=7">
+  <link rel="stylesheet" href="neptsbi.css?v=7">
+  <script src="dougs.js?v=7"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=6"></script>
+  <script src="neptsbi.js?v=7"></script>
 </head>
 <body>
   <header class="app-header">
@@ -18,7 +21,7 @@
       <a class="app-header__title logo" href="#/">nepts<span class="logo__bi">BI</span></a>
       <nav class="app-header__nav" aria-label="Main">
         <a href="#/" data-nav="home">Dashboard</a>
-        <a href="#/work" data-nav="work" hidden>Work</a>
+        <a href="#/work" data-nav="work" hidden>Work <span class="nav-count" id="workCount" hidden></span></a>
         <a href="#/list?status=all" data-nav="list">Vehicles</a>
       </nav>
       <p class="who" id="who" hidden></p>
@@ -28,34 +31,6 @@
   <main id="main" class="container container--wide" tabindex="-1">
     <p class="status-line">Loading…</p>
   </main>
-
-  <dialog id="bookDialog" class="dialog" aria-labelledby="bookTitle">
-    <form id="bookForm" class="stack" method="dialog">
-      <h2 id="bookTitle">Book</h2>
-      <div class="field" id="bookVehField" hidden>
-        <label for="bookVeh">Vehicle</label>
-        <select id="bookVeh"></select>
-        <div class="field__hint">Vans that need booking are listed first.</div>
-      </div>
-      <div class="field">
-        <label for="bookDate">Appointment date</label>
-        <input id="bookDate" type="date" required>
-      </div>
-      <div class="field">
-        <label for="bookCentre" id="bookCentreLabel">Where</label>
-        <select id="bookCentre"></select>
-      </div>
-      <div class="field">
-        <label for="bookNotes">Notes <span class="muted">(optional)</span></label>
-        <input id="bookNotes" type="text" maxlength="500">
-      </div>
-      <p id="bookError" class="field__error" role="alert"></p>
-      <div class="row">
-        <button class="btn btn--go" type="submit" value="save">Book</button>
-        <button class="btn btn--ghost" type="button" data-close>Cancel</button>
-      </div>
-    </form>
-  </dialog>
 
   <script>
   (function () {
@@ -181,7 +156,7 @@
       return html;
     }
 
-    /* ---------------- HOME ---------------- */
+    /* ---------------- DASHBOARD (status only – the work lives on the Work page) ---------------- */
 
     function renderHome(q) {
       setNav("home");
@@ -189,58 +164,98 @@
 
       const view = allowedView(q.get("view"));
       const list = c.vehicles.filter(v => inView(v, view));
-      const k = counts(list, "mot");
-      const ks = counts(list, "service");
+      const k = counts(list, "mot"), ks = counts(list, "service");
+      const all = c.vehicles, ka = counts(all, "mot"), ksa = counts(all, "service");
       const L = (status, check) => link("list", { status, view, check: check === "service" ? "service" : "" });
       const canChoose = m.scope.level !== "base";
+      const svcOnTime = list.length ? (list.length - ks.overdue) / list.length * 100 : 100;
+      const svcOnTimeAll = all.length ? (all.length - ksa.overdue) / all.length * 100 : 100;
+      const miles7 = list.reduce((s, v) => s + v.miles_7, 0);
+      const miles30 = list.reduce((s, v) => s + v.miles_30, 0), vanDays = list.reduce((s, v) => s + v.days_used_30, 0);
+      const vor = list.filter(v => v.status === "Overdue");
 
-      let html = flashHtml();
-      html += `<div class="row row--between" style="align-items:end">
-          <div>
-            <p class="card__eyebrow">${esc(m.role.label)}</p>
-            <h1 style="margin:0">Vehicle checks – for ${fmtNum(k.total)} vehicles ${view === "all" ? "across" : "at"} ${esc(viewName(view))}</h1>
+      let html = `<div class="page-head">
+          <div class="grow">
+            <h1>${esc(view === "all" ? "Whole company" : viewName(view))}</h1>
+            <div class="sub">${NB.fmtDay(NB.isoToday())} · ${fmtNum(list.length)} vans</div>
           </div>
           ${canChoose ? `<div class="field" style="min-width:220px">
-              <label for="viewSelect">Showing</label>
+              <label for="viewSelect" class="visually-hidden">Showing</label>
               <select id="viewSelect">${viewOptions(view)}</select>
             </div>` : ""}
         </div>`;
 
-      // Quick actions: the obvious place to book or record something
-      const wm = workBuckets(list, "mot"), wsv = workBuckets(list, "service");
-      const wlabel = b => [b.result.length ? `${b.result.length} result${b.result.length === 1 ? "" : "s"} to log` : "", b.book.length ? `${b.book.length} to book` : ""].filter(Boolean).join(" · ") || "all done";
-      html += m.role.can_record
-        ? `<div class="quick-actions" role="group" aria-label="Work to do">
-            <a class="btn btn--primary" href="${link("work", { view: view === defaultView() ? "" : view })}">MOTs – ${wlabel(wm)}</a>
-            <a class="btn btn--primary" href="${link("work", { check: "service", view: view === defaultView() ? "" : view })}">Services – ${wlabel(wsv)}</a>
-          </div>`
-        : `<p class="small muted" style="margin:var(--space-3) 0 0">View only – MOTs and services are booked by base managers and the fleet administrator.</p>`;
+      html += `<div class="kpis">
+          <a class="kpi" href="${L("overdue")}">
+            <div class="kpi__label">Off the road (VOR)</div>
+            <div class="kpi__value${vor.length ? " kpi__value--bad" : ""}">${vor.length}</div>
+            <div class="kpi__sub">${vor.length ? "No valid MOT" : "Every van has a valid MOT"}</div>
+          </a>
+          <a class="kpi" href="${L("all")}">
+            <div class="kpi__label">MOT compliant</div>
+            <div class="kpi__value">${k.compliance.toFixed(1)}%</div>
+            <div class="kpi__sub">${view === "all" ? `${fmtNum(k.total - k.overdue)} of ${fmtNum(k.total)} vans` : `Company ${ka.compliance.toFixed(1)}%`}</div>
+          </a>
+          <a class="kpi" href="${L("all", "service")}">
+            <div class="kpi__label">Service on time</div>
+            <div class="kpi__value">${svcOnTime.toFixed(1)}%</div>
+            <div class="kpi__sub">${view === "all" ? `${ks.overdue} overdue` : `Company ${svcOnTimeAll.toFixed(1)}%`}</div>
+          </a>
+          <a class="kpi" href="${link("list", { status: "all", view, sort: "miles" })}">
+            <div class="kpi__label">Miles – last 7 days</div>
+            <div class="kpi__value">${fmtNum(miles7)}</div>
+            <div class="kpi__sub">${vanDays ? fmtNum(Math.round(miles30 / vanDays)) : "–"} a van per working day</div>
+          </a>
+        </div>`;
 
-      // Headline tiles
-      html += `<div class="tiles" style="margin-top:var(--space-4)">
-        <a class="tile tile--info" href="${L("all")}"><div class="tile__value">${fmtNum(k.total)}</div><div class="tile__label">Vehicles</div></a>
-        <a class="tile ${k.overdue ? "tile--warn" : "tile--ok"}" href="${L("all")}"><div class="tile__value">${k.compliance.toFixed(1)}%</div><div class="tile__label">MOT compliant</div></a>
-        <a class="tile ${k.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue")}"><div class="tile__value">${k.overdue}</div><div class="tile__label">Off road – MOT overdue</div></a>
-        <a class="tile ${ks.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue", "service")}"><div class="tile__value">${ks.overdue}</div><div class="tile__label">Service overdue</div></a>
-      </div>`;
-
-      // The check grid (Doug's Power BI layout)
+      // Checks: one row per check, a small bar, and the numbers behind it
+      const row = ch => {
+        if (!ch.live) return `<tr class="soon"><th scope="row">${ch.label}</th><td class="bar-cell"></td><td colspan="3">Coming soon</td></tr>`;
+        const kc = counts(list, ch.key), ok = kc.total - kc.overdue - kc.soon;
+        const pct = n => kc.total ? (n / kc.total * 100).toFixed(2) + "%" : "0";
+        const n = (val, status, cls) => val ? `<a class="${cls || ""}" href="${L(status, ch.key)}">${val}</a>` : `<span class="muted">0</span>`;
+        return `<tr><th scope="row">${ch.label}</th>
+          <td class="bar-cell"><div class="sbar" role="img" aria-label="${ok} OK, ${kc.soon} due soon, ${kc.overdue} overdue">
+            <span class="ok" style="width:${pct(ok)}"></span><span class="soon" style="width:${pct(kc.soon)}"></span><span class="bad" style="width:${pct(kc.overdue)}"></span></div></td>
+          <td>${n(ok, "ok")}</td><td>${n(kc.soon, "due", "n-warn")}</td><td>${n(kc.overdue, "overdue", "n-bad")}</td></tr>`;
+      };
       html += `<h2 class="section-title">Checks</h2>
-        <div class="table-wrap"><table class="check-grid">
-          <thead><tr><th scope="col" style="text-align:left">${fmtNum(k.total)} vehicles</th>
-            <th scope="col">Overdue</th><th scope="col">Due soon</th><th scope="col">Not booked</th></tr></thead>
-          <tbody>${CHECKS.map(ch => {
-            if (!ch.live) return `<tr class="soon"><th scope="row">${ch.label}</th>
-                 <td colspan="3"><span class="big-num big-num--na">Coming soon</span></td></tr>`;
-            const kc = counts(list, ch.key);
-            return `<tr><th scope="row">${ch.label}</th>
-                 <td>${numLink(kc.overdue, L("overdue", ch.key), "danger")}</td>
-                 <td>${numLink(kc.soon, L("due", ch.key), "warn")}</td>
-                 <td>${numLink(kc.notBooked, m.role.can_record
-                   ? link("work", { check: ch.key === "service" ? "service" : "", tab: "book", view: view === defaultView() ? "" : view })
-                   : L("notbooked", ch.key), "warn")}</td></tr>`;
-          }).join("")}
-          </tbody></table></div>`;
+        <div class="dash-card" style="padding:4px 4px">
+          <table class="status-table">
+            <thead><tr><th scope="col" style="text-align:left"><span class="visually-hidden">Check</span></th><th class="bar-cell"><span class="visually-hidden">Picture</span></th>
+              <th scope="col">OK</th><th scope="col">Due in ${c.rules.mot_warning_days ? c.rules.mot_warning_days.value : 30} days</th><th scope="col">Overdue</th></tr></thead>
+            <tbody>${CHECKS.map(row).join("")}</tbody>
+          </table>
+        </div>`;
+
+      // MOTs due by week, and compliance over the last 12 weeks
+      const monday = NB.isoToday(-((new Date().getDay() + 6) % 7));
+      const weeks = Array.from({ length: 8 }, (_, i) => {
+        const start = addDays(monday, i * 7), end = addDays(start, 7);
+        const n = list.filter(v => v.due_date >= start && v.due_date < end).length;
+        return { label: i === 0 ? "This wk" : shortDate(start), value: n, tip: `Week of ${shortDate(start)}: ${n} MOT${n === 1 ? "" : "s"} due` };
+      });
+      const trendDays = Array.from({ length: 12 }, (_, i) => NB.isoToday(-(11 - i) * 7));
+      const mine = trendDays.map(d => complianceOn(list, d)), company = trendDays.map(d => complianceOn(all, d));
+      // Axis from a whole number up to 100, with an even span so the middle line is a whole number too
+      let span = Math.ceil(100 - Math.min(...mine, ...company) + 0.5); if (span % 2) span++;
+      const lo = Math.max(0, 100 - span), hi = 100;
+      const series = [{ values: mine }];
+      if (view !== "all") series.push({ values: company, cmp: true });
+      html += `<div class="grid grid--fit" style="--min: 340px; margin-top: var(--space-4)">
+          <article class="dash-card chart-card">
+            <h2>MOTs due – next 8 weeks</h2><p class="card__desc">How busy the coming weeks are</p>
+            ${NB.barChart(weeks, { ariaLabel: "MOTs due per week for the next 8 weeks", labelEvery: 1, width: 440, height: 170 })}
+            ${NB.chartTable(weeks.map(w => [w.label, String(w.value)]), ["Week", "MOTs due"])}
+          </article>
+          <article class="dash-card chart-card">
+            <h2>MOT compliance – last 12 weeks</h2><p class="card__desc">${view === "all" ? "Whole company" : esc(viewName(view)) + " against the company"}</p>
+            ${NB.lineChart(series, { min: lo, max: hi, width: 440, height: 170, fmt: v => v.toFixed(0) + "%",
+                labels: trendDays.map(shortDate), labelEvery: 3, ariaLabel: "MOT compliance over the last 12 weeks",
+                tips: trendDays.map((d, i) => `${shortDate(d)}: ${mine[i].toFixed(1)}%${view !== "all" ? ` (company ${company[i].toFixed(1)}%)` : ""}`) })}
+            ${view !== "all" ? `<div class="legend"><span><i></i>${esc(viewName(view))}</span><span><i class="cmp"></i>Company</span></div>` : ""}
+          </article>
+        </div>`;
 
       html += mileageSection(list, view);
 
@@ -269,29 +284,36 @@
         });
         html += `<h2 class="section-title">By base</h2>
           <div class="table-wrap"><table class="table">
-            <thead><tr><th>Region</th><th>Base</th><th class="num">Vehicles</th>
+            <thead><tr><th>Region</th><th>Base</th><th class="num">Vans</th>
               <th class="num">MOT overdue</th><th class="num">MOT due soon</th>
               <th class="num">Service overdue</th><th class="num">Service due soon</th>
               <th class="num">MOT compliant</th><th class="num">Miles (30 days)</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table></div>`;
       }
-
-      // Base / region: the vans needing action, with buttons
-      if (view !== "all") {
-        const oneBase = view.startsWith("b:");
-        ["mot", "service"].forEach(check => {
-          const action = list.filter(v => S(v, check).status !== "OK")
-            .sort((a, b) => dueSort(a, b, check));
-          html += `<h2 class="section-title">${CHECK_NAME[check]} – needs action</h2>` +
-            (action.length ? vehicleTable(action, check, { actions: true, oneBase })
-                           : `<div class="empty">Nothing needs action – every ${CHECK_NAME[check].toLowerCase()} is in date and booked.</div>`);
-        });
-      }
+      html += `<p class="work-note">Click any number to see the vans behind it.</p>`;
 
       main.innerHTML = html;
       const sel = document.getElementById("viewSelect");
       if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
-      wireTable();
+    }
+
+    function addDays(iso, n) { const d = NB.parseDate(iso); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+
+    // Share of vans with a valid MOT on a day: covered by a pass, or first MOT not due yet
+    let passesByVan = null;
+    function complianceOn(list, day) {
+      if (!passesByVan) {
+        passesByVan = new Map();
+        c.passes.forEach(p => { if (!passesByVan.has(p.vehicle_id)) passesByVan.set(p.vehicle_id, []); passesByVan.get(p.vehicle_id).push(p); });
+      }
+      if (!list.length) return 100;
+      const ok = list.filter(v => {
+        if (addDays(v.first_registered, 0) > day) return true;
+        const firstDue = NB.parseDate(v.first_registered); firstDue.setFullYear(firstDue.getFullYear() + 3);
+        if (NB.parseDate(day) < firstDue) return true;
+        return (passesByVan.get(v.id) || []).some(p => p.test_date <= day && p.expiry_date >= day);
+      }).length;
+      return ok / list.length * 100;
     }
 
     // Mileage section for a list of vehicles (any slice of the company)
@@ -316,7 +338,7 @@
           <div class="tile tile--info"><div class="tile__value">${vanDays ? fmtNum(Math.round(miles30 / vanDays)) : "–"}</div><div class="tile__label">Miles per van per working day</div></div>
           <div class="tile tile--info"><div class="tile__value">${list.length ? Math.round(vanDays / list.length / 30 * 100) : 0}%</div><div class="tile__label">Van-days used (last 30 days)</div></div>
         </div>
-        <div class="grid" style="--min: 320px; margin-top: var(--space-4)">
+        <div class="grid grid--fit" style="--min: 320px; margin-top: var(--space-4)">
           <article class="card card--plain chart-card">
             <h3>Miles per week</h3><p class="card__desc">Last 26 weeks · ${esc(viewName(view))}</p>
             ${NB.barChart(weekData, { ariaLabel: "Miles per week, last 26 weeks", labelEvery: 6, width: 420 })}
@@ -365,7 +387,6 @@
           </article>` : ""}
         </div>`;
     }
-
     /* ---------------- LIST (drill-down) ---------------- */
 
     const STATUS_WORDS = { overdue: "overdue", due: "due soon", notbooked: "needs booking", ok: "OK", all: "" };
@@ -417,7 +438,7 @@
           <div class="field"><label for="fFind">Find</label>
             <input id="fFind" type="search" placeholder="Reg, make, type…" value="${esc(q.get("find") || "")}"></div>
         </form>
-        ${list.length ? vehicleTable(list, check, { oneBase: view.startsWith("b:"), miles: true, actions: true }) : `<div class="empty">Nothing here – all good.</div>`}`;
+        ${list.length ? vehicleTable(list, check, { oneBase: view.startsWith("b:"), miles: true }) : `<div class="empty">Nothing here – all good.</div>`}`;
 
       const $ = id => document.getElementById(id);
       const go = () => {
@@ -470,24 +491,88 @@
         if (e.target.closest("a, button")) return;
         location.hash = tr.dataset.href;
       }));
-      main.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book, b.dataset.kind || "mot")));
+      wireActions(main, "mot");
+    }
+    /* ---------------- WORK: one list per check – Reg · Stage · What's happening · Next step ---------------- */
+
+    const today = () => NB.isoToday();
+    const normReg = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+    // Where each van is in the process, for one check (null = nothing to show)
+    function stageOf(v, check) {
+      const s = S(v, check);
+      if (s.awaiting_result) return "result";
+      if (check === "mot" && v.retest && !s.booked) return "retest";
+      if (!s.booked && s.status !== "OK") return "book";
+      if (s.booked) return "booked";
+      return null;
+    }
+    const NEEDS_ACTION = new Set(["result", "retest", "book"]);
+    const STAGE_ORDER = { result: 0, book: 1, retest: 2, booked: 3 };
+
+    function workItems(list, check) {
+      return list.map(v => ({ v, s: S(v, check), stage: stageOf(v, check) }))
+        .filter(r => r.stage)
+        .sort((a, b) => {
+          const pa = STAGE_ORDER[a.stage] - (a.stage === "book" && a.s.status === "Overdue" ? 0.5 : 0);
+          const pb = STAGE_ORDER[b.stage] - (b.stage === "book" && b.s.status === "Overdue" ? 0.5 : 0);
+          if (pa !== pb) return pa - pb;
+          if (a.stage === "booked" || a.stage === "result") return a.s.booking_date.localeCompare(b.s.booking_date);
+          return dueSort(a.v, b.v, check);
+        });
     }
 
-    /* ---------------- WORK (book → test → log the result) ---------------- */
+    // How many things need doing (for the red count on "Work")
+    function workCount() {
+      if (!m.role.can_record) return 0;
+      const list = c.vehicles.filter(v => inView(v, defaultView()));
+      return ["mot", "service"].reduce((n, ch) => n + workItems(list, ch).filter(r => NEEDS_ACTION.has(r.stage)).length, 0);
+    }
+    function updateBadge() {
+      const b = document.getElementById("workCount");
+      if (!b) return;
+      const n = workCount();
+      b.textContent = n; b.hidden = !n;
+      b.setAttribute("aria-label", n + " to do");
+    }
 
-    const normReg = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const today = () => NB.isoToday();
+    // The MOT position in a few plain words
+    function motWhat(v) {
+      const d = v.days_to_due;
+      if (d < 0) return `MOT expired ${-d === 1 ? "yesterday" : -d + " days ago"} – off the road`;
+      if (d === 0) return "MOT runs out today";
+      return `MOT runs out ${NB.fmtDay(v.due_date, true)} – in ${d} day${d === 1 ? "" : "s"}`;
+    }
+    function svcWhat(s) {
+      if (s.miles_left < 0) return `Service overdue – ${fmtNum(-s.miles_left)} miles over`;
+      const d = NB.daysBetween(today(), s.effective_due_date);
+      if (d < 0) return `Service overdue – ${-d} day${d === -1 ? "" : "s"} (6 months up)`;
+      return `Service due ${NB.fmtDay(s.effective_due_date, true)} – ${fmtNum(s.miles_left)} miles left`;
+    }
 
-    function workBuckets(list, check) {
-      const st = v => S(v, check);
-      const needsBooking = v => !st(v).booked && (st(v).status !== "OK" || (check === "mot" && v.retest));
-      return {
-        book: list.filter(needsBooking).sort((a, b) => dueSort(a, b, check)),
-        booked: list.filter(v => st(v).booked && !st(v).awaiting_result)
-                    .sort((a, b) => st(a).booking_date.localeCompare(st(b).booking_date)),
-        result: list.filter(v => st(v).awaiting_result)
-                    .sort((a, b) => st(a).booking_date.localeCompare(st(b).booking_date))
-      };
+    function stageCell(r, check) {
+      const { s, stage, v } = r;
+      if (stage === "result") return `<span class="stage stage--amber">Result to log</span>`;
+      if (stage === "retest") return `<span class="stage stage--amber">Failed – retest</span>`;
+      if (stage === "book") return `<span class="stage ${s.status === "Overdue" ? "stage--red" : "stage--grey"}">Not booked</span>`;
+      return `<span class="stage stage--green">Booked ${NB.fmtDay(s.booking_date, true)}</span>`;
+    }
+    function whatCell(r, check) {
+      const { s, stage, v } = r;
+      if (check === "service") {
+        if (stage === "result") return `In for service ${NB.fmtDay(s.booking_date, true)}`;
+        return svcWhat(s);
+      }
+      if (stage === "result") return `Tested ${NB.fmtDay(s.booking_date, true)}`;
+      if (stage === "retest") return `Failed ${NB.fmtDay(v.last_test_date, true)} · ${v.days_to_due < 0 ? "off the road" : "MOT still runs to " + NB.fmtDay(v.due_date, true)}`;
+      return motWhat(v) + (v.retest ? " · retest" : "");
+    }
+    function nextCell(r, check) {
+      const reg = esc(r.v.registration);
+      if (r.stage === "result") return `<button class="btn btn--primary btn-sm" type="button" data-log="${reg}">Log result</button>`;
+      if (r.stage === "booked") return `<button class="linkish" type="button" data-book="${reg}">Change</button>`;
+      const word = check === "service" ? "Book service" : r.stage === "retest" ? "Book retest" : "Book test";
+      return `<button class="btn btn--primary btn-sm" type="button" data-book="${reg}">${word}</button>`;
     }
 
     function renderWork(q) {
@@ -495,352 +580,497 @@
       if (!m.role.can_record) return notAllowed("bookings");
       const check = q.get("check") === "service" ? "service" : "mot";
       const view = allowedView(q.get("view"));
+      const oneBase = view.startsWith("b:");
       const list = c.vehicles.filter(v => inView(v, view));
-      const bk = workBuckets(list, check);
-      let tab = ["book", "booked", "result"].includes(q.get("tab")) ? q.get("tab") : (bk.result.length ? "result" : "book");
-      const word = check === "service" ? "service" : "MOT";
-      const TABS = [["result", "Results to log"], ["book", "To book"], ["booked", "Booked"]];
-      const W = (params) => link("work", Object.assign({ check: check === "service" ? "service" : "", view: view === defaultView() ? "" : view, tab }, params));
+      const items = workItems(list, check);
+      const need = items.filter(r => NEEDS_ACTION.has(r.stage)), booked = items.filter(r => r.stage === "booked");
+      const f = ["all", "action", "booked"].includes(q.get("f")) ? q.get("f") : "all";
+      const shown = f === "action" ? need : f === "booked" ? booked : items;
+      const W = params => link("work", Object.assign({ check: check === "service" ? "service" : "", view: view === defaultView() ? "" : view, f: f === "all" ? "" : f }, params));
+      const isSvc = check === "service";
 
-      main.innerHTML = flashHtml() + `
-        <div class="row row--between" style="align-items:end">
-          <div>
-            <p class="card__eyebrow">Work · ${esc(viewName(view))}</p>
-            <h1 style="margin:0">${check === "service" ? "Services" : "MOTs"}</h1>
+      main.innerHTML = `
+        <div class="page-head">
+          <h1>${isSvc ? "Services" : "MOTs"}</h1>
+          <div class="pill-toggle" role="group" aria-label="MOT or service">
+            <button type="button" aria-pressed="${!isSvc}" data-goto="${W({ check: "" })}">MOT</button>
+            <button type="button" aria-pressed="${isSvc}" data-goto="${W({ check: "service" })}">Service</button>
           </div>
-          <div class="row" style="align-items:end">
-            ${m.scope.level !== "base" ? `<div class="field" style="min-width:200px"><label for="wView">Showing</label><select id="wView">${viewOptions(view)}</select></div>` : ""}
-            <div class="segmented" role="group" aria-label="MOT or service" style="min-width:220px">
-              <button type="button" data-goto="${link("work", { view: view === defaultView() ? "" : view })}" aria-pressed="${check === "mot"}">MOT</button>
-              <button type="button" data-goto="${link("work", { check: "service", view: view === defaultView() ? "" : view })}" aria-pressed="${check === "service"}">Service</button>
-            </div>
-          </div>
+          <span class="grow"></span>
+          ${m.scope.level !== "base" ? `<div class="field" style="min-width:200px"><label for="wView" class="visually-hidden">Showing</label><select id="wView">${viewOptions(view)}</select></div>` : ""}
+          ${isSvc ? `<a class="btn btn--primary" href="${link("record-service", { back: "work" })}">+ Log service</a>`
+                  : `<button class="btn btn--primary" type="button" data-log="" title="Shortcut: L">+ Log MOT result</button>`}
         </div>
-
-        <div class="work-find">
-          <div class="field">
-            <label for="wFind">Find a vehicle <span class="muted">– type any part of the registration</span></label>
-            <input id="wFind" type="search" autocomplete="off" placeholder="e.g. 142" value="${esc(q.get("find") || "")}">
-          </div>
+        <div class="chips" role="group" aria-label="Show">
+          <button class="chip" type="button" aria-pressed="${f === "all"}" data-goto="${W({ f: "" })}">All <span class="chip__n">${items.length}</span></button>
+          <button class="chip" type="button" aria-pressed="${f === "action"}" data-goto="${W({ f: "action" })}">Needs action <span class="chip__n${need.length ? " chip__n--alert" : ""}">${need.length}</span></button>
+          <button class="chip" type="button" aria-pressed="${f === "booked"}" data-goto="${W({ f: "booked" })}">Booked <span class="chip__n">${booked.length}</span></button>
         </div>
-        <div id="wFound"></div>
-
-        <div class="segmented work-tabs" role="tablist" aria-label="Stage">
-          ${TABS.map(([k, l]) => `<button type="button" role="tab" aria-selected="${k === tab}" aria-pressed="${k === tab}" data-goto="${W({ tab: k })}">${l} <span class="work-count">${bk[k].length}</span></button>`).join("")}
-        </div>
-        <p class="small muted" style="margin:var(--space-2) 0 var(--space-3)">${
-          tab === "book" ? `Overdue, due in the next ${c.rules[check === "service" ? "service_warning_days" : "mot_warning_days"].value} days${check === "mot" ? ", or failed and needing a retest" : ""} – and not booked yet.`
-          : tab === "booked" ? `Booked and waiting for the day. Log the result early if you already have it.`
-          : `The appointment has been and gone – log the result from the ${check === "service" ? "workshop" : "certificate"}.`}</p>
-        <div id="wList">${bk[tab].length ? workTable(bk[tab], check, tab) : `<div class="empty">${
-          tab === "result" ? "No results waiting – all logged." : tab === "book" ? `Nothing to book – every ${word} is in date or booked.` : "Nothing booked at the moment."}</div>`}</div>`;
+        ${shown.length ? `<table class="work">
+          <thead><tr><th class="c-reg">Reg</th><th class="c-stage">Stage</th><th class="c-what">What's happening</th><th class="c-next">Next step</th></tr></thead>
+          <tbody>${shown.map(r => `<tr>
+            <td class="c-reg"><a class="reg" href="${link("van/" + r.v.registration)}">${esc(r.v.registration)}</a>${oneBase ? "" : `<span class="where">${esc(r.v.base_name)}</span>`}</td>
+            <td class="c-stage">${stageCell(r, check)}</td>
+            <td class="c-what">${whatCell(r, check)}</td>
+            <td class="c-next">${nextCell(r, check)}</td></tr>`).join("")}</tbody>
+        </table>` : `<div class="empty">${f === "booked" ? "Nothing booked at the moment." : `Nothing to do – every ${isSvc ? "service" : "MOT"} is in date or booked.`}</div>`}
+        <p class="work-note">Showing vans ${isSvc ? "with a service" : "with an MOT"} due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days, or with something still to do.</p>`;
 
       main.querySelectorAll("[data-goto]").forEach(b => b.addEventListener("click", () => { location.hash = b.dataset.goto; }));
       const wv = document.getElementById("wView");
-      if (wv) wv.addEventListener("change", () => { location.hash = link("work", { check: check === "service" ? "service" : "", view: wv.value }); });
-
-      // Find any vehicle (booked through the app or not)
-      const find = document.getElementById("wFind"), found = document.getElementById("wFound");
-      const showFound = () => {
-        const t = normReg(find.value);
-        if (t.length < 2) { found.innerHTML = ""; return; }
-        const hits = list.filter(v => normReg(v.registration).includes(t) || normReg(v.fleet_number).includes(t)).slice(0, 8);
-        found.innerHTML = hits.length
-          ? `<h2 class="section-title">Found ${hits.length === 8 ? "(first 8)" : ""}</h2>` + workTable(hits, check, "find")
-          : `<p class="status-line">No vehicle matching “${esc(find.value)}” at ${esc(viewName(view))}.</p>`;
-        wireWork(found, check, view);
-      };
-      find.addEventListener("input", showFound);
-      showFound();
-      wireWork(document.getElementById("wList"), check, view);
+      if (wv) wv.addEventListener("change", () => { location.hash = link("work", { check: isSvc ? "service" : "", view: wv.value }); });
+      wireActions(main, check);
     }
 
-    function workTable(rows, check, mode) {
-      const isSvc = check === "service";
-      return `<div class="table-wrap"><table class="table work-table">
-        <thead><tr><th>Vehicle</th><th>${isSvc ? "Service due" : "MOT due"}</th><th>Booking</th><th>${mode === "book" ? "Book it" : '<span class="visually-hidden">Action</span>'}</th></tr></thead>
-        <tbody>${rows.map(v => workRow(v, check, mode)).join("")}</tbody></table></div>`;
+    // Buttons with data-book / data-log anywhere on a page
+    function wireActions(root, check) {
+      root.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book, b.dataset.kind || check)));
+      root.querySelectorAll("[data-log]").forEach(b => b.addEventListener("click", () => {
+        if ((b.dataset.kind || check) === "service") location.hash = link("record-service", { reg: b.dataset.log, back: currentHash() });
+        else openLogPanel(b.dataset.log);
+      }));
+    }
+    const currentHash = () => location.hash.replace(/^#\/?/, "") || "";
+
+    // Shortcut: L opens "Log MOT result" (not while typing)
+    document.addEventListener("keydown", e => {
+      if (e.key.toLowerCase() !== "l" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (document.querySelector(".panel") || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+      if (!m || !m.role.can_record) return;
+      e.preventDefault(); openLogPanel("");
+    });
+
+    /* ---------------- toast (short "done" message) ---------------- */
+    function toast(html) {
+      let t = document.getElementById("toast");
+      if (!t) {
+        t = document.createElement("div");
+        t.id = "toast"; t.setAttribute("role", "status");
+        t.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:90;max-width:calc(100% - 32px);padding:10px 16px;border-radius:8px;background:var(--text);color:var(--bg);box-shadow:0 8px 24px rgb(0 0 0 / .2);font-size:var(--text-md)";
+        document.body.appendChild(t);
+      }
+      t.innerHTML = html; t.hidden = false;
+      clearTimeout(t._h); t._h = setTimeout(() => { t.hidden = true; }, 5000);
     }
 
-    function workRow(v, check, mode) {
-      const isSvc = check === "service";
-      const s = S(v, check);
-      const due = isSvc
-        ? `${statusBadge(s.status)} <span class="nums">${fmtDate(s.effective_due_date)}</span><div class="small muted">${serviceDueText(s)}</div>`
-        : `${statusBadge(v.status)}${v.retest ? ' <span class="badge badge--danger">Retest</span>' : ""} <span class="nums">${fmtDate(v.due_date)}</span><div class="small muted">${daysText(v.days_to_due)}${v.retest ? ` · failed ${fmtDate(v.last_test_date)}` : ""}</div>`;
-      const booking = s.booked
-        ? `<span class="nums">${fmtDate(s.booking_date)}</span>${s.awaiting_result ? ' <span class="badge badge--warn">Result to log</span>' : thisWeek(s.booking_date) ? ' <span class="badge badge--info">This week</span>' : ""}
-           <div class="small muted">${esc((isSvc ? s.booking_provider : s.booking_centre) || "")}</div>`
-        : '<span class="muted">Not booked</span>';
-      let action;
-      if (mode === "book") action = bookInline(v, check);
-      else if (mode === "booked") action = `<div class="row"><button class="btn btn--ghost action-btn" type="button" data-log="${esc(v.registration)}">Log result</button>
-          <button class="link-btn" type="button" data-rebook="${esc(v.registration)}">Change date</button></div>`;
-      else if (mode === "result") action = `<button class="btn btn--primary action-btn" type="button" data-log="${esc(v.registration)}">Log result</button>`;
-      else action = `<div class="row">${!s.booked ? `<button class="btn btn--secondary action-btn" type="button" data-rebook="${esc(v.registration)}">Book</button>` : ""}
-          <button class="btn btn--ghost action-btn" type="button" data-log="${esc(v.registration)}">Log result</button></div>`;
-      return `<tr data-reg="${esc(v.registration)}">
-        <td><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a>
-          <div class="small muted">${esc(v.class_short)} · ${esc(v.make)} ${esc(v.model)}${m.scope.level === "base" ? "" : " · " + esc(v.base_name)}</div></td>
-        <td>${due}</td>
-        <td>${booking}</td>
-        <td class="work-action">${action}</td>
-      </tr>`;
+    /* ---------------- LOG MOT RESULT: side panel or page ----------------
+       People type from the certificate; the app checks and warns, it never fills the answers in
+       (except "Fetch from DVSA", which fills everything and says so). */
+
+    const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>';
+    const CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+    let logDirty = false;   // something saved – the page behind needs redrawing on close
+
+    function openLogPanel(reg) {
+      logDirty = false;
+      const p = NB.openPanel("Log MOT result", { onClose: () => { if (logDirty) render(); } });
+      logForm(p.el, { reg, head: p.head, close: p.close, mode: "panel" });
     }
 
-    function thisWeek(iso) { return iso >= today() && iso <= NB.isoToday(7); }
-
-    function bookInline(v, check) {
-      const isSvc = check === "service";
-      const s = S(v, check);
-      const daysLeft = isSvc ? Math.round((NB.parseDate(s.effective_due_date) - NB.parseDate(today())) / 864e5) : v.days_to_due;
-      const suggested = NB.isoToday(daysLeft > 3 ? Math.min(daysLeft - 2, 14) : 1);
-      const opts = isSvc ? c.providers : c.centres;
-      // default place: where it went last time / its base's usual one
-      const usual = isSvc ? (s.booking_provider || "") : (s.booking_centre || "");
-      const pick = opts.find(o => o.name === usual) || opts.find(o => o.name.startsWith(v.base_name)) || opts[0];
-      return `<form class="book-inline" data-book-reg="${esc(v.registration)}" novalidate>
-          <label class="visually-hidden" for="bd-${esc(v.registration)}">Date</label>
-          <input class="input" id="bd-${esc(v.registration)}" type="date" value="${suggested}" min="${today()}" max="${NB.isoToday(120)}" required>
-          <label class="visually-hidden" for="bc-${esc(v.registration)}">${isSvc ? "Workshop" : "Test centre"}</label>
-          <select class="input" id="bc-${esc(v.registration)}">${opts.map(o => `<option value="${o.id}"${o.id === pick.id ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
-          <button class="btn btn--go" type="submit">Book</button>
-          <span class="field__error" role="alert"></span>
-        </form>`;
+    function renderLogPage(q) {
+      setNav("work");
+      if (!m.role.can_record) return notAllowed("MOTs");
+      main.innerHTML = `<a class="back-link" href="${link("work")}">MOTs</a>
+        <div class="page-form"><div class="panel__head"><h2>Log MOT result</h2><span data-steps></span></div><div data-lf style="display:flex;flex-direction:column"></div></div>`;
+      logForm(main.querySelector("[data-lf]"), { reg: (q.get("reg") || "").toUpperCase(), head: main.querySelector("[data-steps]"),
+        close: () => { location.hash = link("work"); }, mode: "page" });
     }
 
-    function wireWork(root, check, view) {
-      // Book (inline)
-      root.querySelectorAll("form.book-inline").forEach(f => f.addEventListener("submit", async e => {
-        e.preventDefault();
-        const reg = f.dataset.bookReg, isSvc = check === "service";
-        const [dateEl, placeEl] = f.querySelectorAll("input, select");
-        const err = f.querySelector(".field__error");
+    function logForm(root, opts) {
+      const state = { reg: opts.reg || "", result: "", test: "", expiry: "", miles: "", centre: "", adv: "", fails: "", fromDvsa: false, centreFromBooking: false };
+      const mineVans = () => c.vehicles.filter(x => inView(x, defaultView()) || m.scope.level === "company");
+      const veh = () => c.vehicleByReg.get(normReg(state.reg));
+      // Default the test centre from the booking (people only change it if it's wrong)
+      function centreDefault() {
+        const v = veh();
+        const cen = v && v.booking_centre && c.centres.find(x => x.name === v.booking_centre);
+        state.centre = cen ? String(cen.id) : ""; state.centreFromBooking = !!cen;
+      }
+      if (veh()) centreDefault();
+
+      const steps = n => { opts.head.innerHTML = `<ol class="steps">${["Details", "Check", "Saved"].map((t, i) =>
+        `<li${i + 1 === n ? ' aria-current="step"' : ""}>${i + 1} ${t}</li>${i < 2 ? "<li aria-hidden=\"true\">›</li>" : ""}`).join("")}</ol>`; };
+
+      /* ---- step 1: details ---- */
+      function edit(focusName) {
+        steps(1);
+        const v = veh();
+        root.innerHTML = `<form class="lf-form" novalidate style="display:flex;flex-direction:column;flex:1;min-height:0">
+          <div class="panel__body"><div class="lf">
+            <div class="field">
+              <label for="lfReg">Reg</label>
+              <div class="lf-reg">
+                <div class="ta"><input class="input" id="lfReg" name="reg" autocomplete="off" spellcheck="false" value="${esc(state.reg)}"
+                    role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="lfRegList" aria-describedby="lfRegHint">
+                  <ul class="ta__list" id="lfRegList" role="listbox" hidden></ul></div>
+                <button class="btn btn--ghost" type="button" data-dvsa>Fetch from DVSA</button>
+              </div>
+              <div class="lf-hint" id="lfRegHint"></div>
+            </div>
+            <div class="lf-note" data-note hidden></div>
+            <div class="field">
+              <span class="label" id="lfResLabel">Result</span>
+              <div class="result-tiles" role="radiogroup" aria-labelledby="lfResLabel">
+                ${["Pass", "Fail"].map(r => `<button type="button" class="result-tile" role="radio" data-v="${r}" aria-checked="${state.result === r}">
+                  <span class="result-tile__icon">${r === "Pass" ? TICK : CROSS}</span>${r}</button>`).join("")}
+              </div>
+            </div>
+            <div class="lf-two">
+              <div class="field"><label for="lfTest">Test date</label>
+                <input class="input" id="lfTest" name="test" inputmode="numeric" placeholder="dd/mm/yyyy" autocomplete="off" value="${esc(state.test)}">
+                <div class="lf-hint" data-prev="test"></div></div>
+              <div class="field" data-pass><label for="lfExp">New expiry date</label>
+                <input class="input" id="lfExp" name="expiry" inputmode="numeric" placeholder="dd/mm/yyyy" autocomplete="off" value="${esc(state.expiry)}">
+                <div class="lf-hint" data-prev="expiry"></div></div>
+            </div>
+            <div class="field" data-fail><label for="lfFails">Reasons for failure <span class="muted">(one per line)</span></label>
+              <textarea class="input" id="lfFails" name="fails" rows="3">${esc(state.fails)}</textarea></div>
+            <div class="lf-two">
+              <div class="field"><label for="lfMiles">Mileage</label>
+                <input class="input" id="lfMiles" name="miles" inputmode="numeric" autocomplete="off" value="${esc(state.miles)}">
+                <div class="lf-hint" data-prev="miles">As shown on the certificate</div></div>
+              <div class="field"><label for="lfCentre">Test centre</label>
+                <select class="input" id="lfCentre" name="centre"><option value="">Choose…</option>${c.centres.map(x =>
+                  `<option value="${x.id}"${String(x.id) === state.centre ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+                <div class="lf-hint" data-centre-hint>${state.centreFromBooking ? "From the booking" : ""}</div></div>
+            </div>
+            <div class="field"><label for="lfAdv">Advisories <span class="muted">(if any, one per line)</span></label>
+              <textarea class="input" id="lfAdv" name="adv" rows="2">${esc(state.adv)}</textarea></div>
+            <div class="errbox" data-err role="alert"></div>
+          </div></div>
+          <div class="panel__foot">
+            <button class="btn btn--primary" type="submit">Check answers</button>
+            <button class="btn btn--ghost" type="button" data-cancel>Cancel</button>
+          </div></form>`;
+
+        const f = root.querySelector("form"), $f = n => f.elements[n];
+        const showResult = () => {
+          f.querySelectorAll(".result-tile").forEach(b => b.setAttribute("aria-checked", String(b.dataset.v === state.result)));
+          f.querySelector("[data-pass]").hidden = state.result === "Fail";
+          f.querySelector("[data-fail]").hidden = state.result !== "Fail";
+        };
+        const regHint = () => {
+          const el = f.querySelector("#lfRegHint"), vv = veh();
+          el.className = "lf-hint";
+          if (!state.reg) { el.textContent = "Type any part of the reg"; return; }
+          if (!vv) { el.textContent = normReg(state.reg).length >= 6 ? "No van with that reg" : ""; el.className = "lf-hint lf-hint--bad"; return; }
+          el.textContent = vv.days_to_due < 0 ? `MOT expired ${NB.fmtDay(vv.due_date)} – off the road` : `Current MOT runs to ${NB.fmtDay(vv.due_date)}`;
+        };
+        const preview = name => {
+          const el = f.querySelector(`[data-prev="${name}"]`);
+          if (!el) return;
+          const val = state[name];
+          el.className = "lf-hint";
+          if (name === "miles") {
+            const n = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+            el.textContent = val && !isNaN(n) ? fmtNum(n) + " miles" : "As shown on the certificate";
+            return;
+          }
+          const iso = NB.parseTyped(val);
+          if (iso === "") el.textContent = "";
+          else if (iso === null) { el.textContent = "Not a date – type it as dd/mm/yyyy"; el.className = "lf-hint lf-hint--bad"; }
+          else el.textContent = NB.fmtDay(iso);
+        };
+        showResult(); regHint(); ["test", "expiry", "miles"].forEach(preview);
+        if (state.fromDvsa) note();
+
+        // Typing anywhere keeps the state; a typed change means it's no longer "as fetched"
+        f.addEventListener("input", e => {
+          const n = e.target.name;
+          if (!n || n === "reg") return;
+          state[n] = e.target.value;
+          if (n === "centre") { state.centreFromBooking = false; f.querySelector("[data-centre-hint]").textContent = ""; }
+          preview(n);
+        });
+        f.addEventListener("change", e => { if (e.target.name === "centre") { state.centre = e.target.value; state.centreFromBooking = false; f.querySelector("[data-centre-hint]").textContent = ""; } });
+
+        // Result tiles: click, or arrow keys / P / F
+        f.querySelectorAll(".result-tile").forEach(b => {
+          b.addEventListener("click", () => { state.result = b.dataset.v; showResult(); });
+          b.addEventListener("keydown", e => {
+            const k = e.key.toLowerCase();
+            const pick = k === "p" ? "Pass" : k === "f" ? "Fail" : /arrow/.test(k) ? (state.result === "Pass" ? "Fail" : "Pass") : null;
+            if (!pick) return;
+            e.preventDefault(); state.result = pick; showResult();
+            f.querySelector(`.result-tile[data-v="${pick}"]`).focus();
+          });
+        });
+
+        // Reg type-ahead
+        const input = $f("reg"), listEl = f.querySelector("#lfRegList");
+        let hits = [], sel = -1;
+        const draw = () => {
+          listEl.innerHTML = hits.map((x, i) => `<li class="ta__item" role="option" id="lfo${i}" aria-selected="${i === sel}" data-reg="${esc(x.registration)}">
+              <span class="reg">${esc(x.registration)}</span><small>${x.awaiting_result ? "Result to log" : x.days_to_due < 0 ? "MOT expired" : "MOT " + NB.fmtDay(x.due_date, true)}${m.scope.level === "base" ? "" : " · " + esc(x.base_name)}</small></li>`).join("");
+          const open = hits.length > 0;
+          listEl.hidden = !open; input.setAttribute("aria-expanded", String(open));
+          if (sel >= 0) input.setAttribute("aria-activedescendant", "lfo" + sel); else input.removeAttribute("aria-activedescendant");
+        };
+        const choose = reg => {
+          state.reg = reg; input.value = reg; hits = []; draw(); centreDefault();
+          const cs = $f("centre"); cs.value = state.centre;
+          f.querySelector("[data-centre-hint]").textContent = state.centreFromBooking ? "From the booking" : "";
+          regHint();
+          f.querySelector(".result-tile").focus();
+        };
+        input.addEventListener("input", () => {
+          state.reg = input.value; state.fromDvsa = false; f.querySelector("[data-note]").hidden = true;
+          const t = normReg(input.value);
+          // Vans waiting for a result come first
+          hits = t.length < 1 ? [] : mineVans().filter(x => normReg(x.registration).includes(t))
+            .sort((a, b) => (b.awaiting_result - a.awaiting_result) || a.registration.localeCompare(b.registration)).slice(0, 8);
+          if (hits.length === 1 && normReg(hits[0].registration) === t) hits = [];
+          sel = hits.length ? 0 : -1;
+          draw(); regHint();
+        });
+        input.addEventListener("keydown", e => {
+          if (!hits.length) return;
+          if (e.key === "ArrowDown") { e.preventDefault(); sel = (sel + 1) % hits.length; draw(); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); sel = (sel - 1 + hits.length) % hits.length; draw(); }
+          else if (e.key === "Enter" || e.key === "Tab") { if (sel >= 0) { e.preventDefault(); choose(hits[sel].registration); } }
+          else if (e.key === "Escape") { e.preventDefault(); hits = []; draw(); }
+        });
+        input.addEventListener("blur", () => setTimeout(() => { hits = []; draw(); }, 150));
+        listEl.addEventListener("mousedown", e => { const li = e.target.closest("[data-reg]"); if (li) { e.preventDefault(); choose(li.dataset.reg); } });
+
+        f.querySelector("[data-dvsa]").addEventListener("click", fetchDvsa);
+        f.querySelector("[data-cancel]").addEventListener("click", opts.close);
+        f.addEventListener("submit", e => { e.preventDefault(); check(); });
+
+        const target = focusName ? f.elements[focusName] || f.querySelector(focusName) : (state.reg && veh() ? f.querySelector(".result-tile") : input);
+        if (target) target.focus();
+      }
+
+      function note() {
+        const el = root.querySelector("[data-note]");
+        el.hidden = false;
+        el.className = "lf-note";
+        el.innerHTML = `Filled in from DVSA. <strong>Check each one against the certificate.</strong>` +
+          `<div class="muted small" style="margin-top:4px">Demo van – this is a made-up DVSA record. Real regs will come from the DVSA itself.</div>`;
+      }
+
+      /* ---- "Fetch from DVSA" (simulated for the demo's made-up regs) ---- */
+      async function fetchDvsa() {
+        const v = veh(), btn = root.querySelector("[data-dvsa]"), el = root.querySelector("[data-note]");
+        if (!v) { el.hidden = false; el.className = "lf-note lf-note--demo"; el.textContent = "Type or pick a reg first."; return; }
+        btn.disabled = true; btn.textContent = "Fetching…";
+        const testDay = v.awaiting_result ? v.booking_date : null;
+        if (!testDay) {
+          btn.disabled = false; btn.textContent = "Fetch from DVSA";
+          el.hidden = false; el.className = "lf-note lf-note--demo";
+          el.textContent = `No new test on the DVSA record for ${v.registration} since the last one logged${v.last_test_date ? " (" + NB.fmtDate(v.last_test_date) + ")" : ""}.`;
+          return;
+        }
+        const [exp, odo] = await Promise.all([
+          NB.db.rpc("mot_expiry_for", { p_vehicle_id: v.id, p_test_date: testDay }),
+          NB.db.from("daily_mileage").select("odometer").eq("vehicle_id", v.id).lte("day", testDay).order("day", { ascending: false }).limit(1)
+        ]);
+        const num = parseInt(v.registration.replace(/\D/g, ""), 10) || 0;
+        const fail = num % 4 === 0;
+        const ADV = ["Nearside front tyre worn close to legal limit", "Offside rear brake disc slightly worn", "Minor oil leak, not excessive",
+                     "Front wiper blade deteriorated", "Exhaust has a minor leak of exhaust gases"];
+        const FAILS = ["Nearside headlamp aim too high", "Offside front brake pad less than 1.5mm thick", "Windscreen wiper does not clear the windscreen effectively"];
+        state.result = fail ? "Fail" : "Pass";
+        state.test = NB.toTyped(testDay);
+        state.expiry = fail ? "" : NB.toTyped(exp.data);
+        const o = odo.data && odo.data[0] ? odo.data[0].odometer : v.odometer;
+        state.miles = o ? fmtNum(o + 6) : "";
+        state.adv = num % 3 === 0 ? "" : ADV[num % ADV.length];
+        state.fails = fail ? FAILS[num % FAILS.length] : "";
+        centreDefault();
+        state.fromDvsa = true;
+        edit("[type=submit]");
+      }
+
+      /* ---- step 2: check answers ---- */
+      async function check() {
+        const f = root.querySelector("form"), err = f.querySelector("[data-err]");
         err.textContent = "";
-        if (!dateEl.value || dateEl.value < today()) { err.textContent = "Pick a date from today on."; return; }
-        const args = { p_registration: reg, p_date: dateEl.value, p_notes: "", p_person: m.person.code };
-        if (isSvc) args.p_provider_id = +placeEl.value; else args.p_centre_id = +placeEl.value;
-        f.querySelector("button").disabled = true;
-        const r = await NB.db.rpc(isSvc ? "book_service" : "book_mot", args);
-        if (r.error) { err.textContent = NB.friendlyError(r.error); f.querySelector("button").disabled = false; return; }
-        await reload();
-        flash = `<strong>Booked</strong>${esc(reg)} – ${isSvc ? "service" : "MOT"} on ${fmtDate(dateEl.value)} at ${esc(placeEl.selectedOptions[0].textContent)}.`;
-        render();
-      }));
-      // Change date / book from search: swap the action cell for the inline booking form
-      root.querySelectorAll("[data-rebook]").forEach(b => b.addEventListener("click", () => {
-        const v = c.vehicleByReg.get(b.dataset.rebook);
-        const cell = b.closest("td");
-        cell.innerHTML = bookInline(v, check);
-        wireWork(cell, check, view);
-        cell.querySelector("input").focus();
-      }));
-      // Log result: open the panel under the row
-      root.querySelectorAll("[data-log]").forEach(b => b.addEventListener("click", () => openResultPanel(b.closest("tr"), b.dataset.log, check)));
+        const v = veh();
+        const test = NB.parseTyped(state.test), expiry = NB.parseTyped(state.expiry);
+        const miles = parseInt(String(state.miles).replace(/[^0-9]/g, ""), 10);
+        const lines = t => (t || "").split("\n").map(x => x.trim()).filter(Boolean);
+        const errors = [];
+        const bad = (msg, field) => { errors.push({ msg, field }); };
+        if (!v) bad(state.reg ? `There's no van ${normReg(state.reg)} – pick one from the list.` : "Type the reg.", "reg");
+        if (!state.result) bad("Choose Pass or Fail.", ".result-tile");
+        if (!test) bad(test === "" ? "Type the test date." : "The test date isn't a real date – type it as dd/mm/yyyy.", "test");
+        else if (test > today()) bad("The test date can't be in the future.", "test");
+        else if (test < NB.isoToday(-90)) bad("The test date is more than 90 days ago – check it.", "test");
+        if (state.result === "Pass") {
+          if (!expiry) bad(expiry === "" ? "Type the new expiry date from the certificate." : "The expiry isn't a real date – type it as dd/mm/yyyy.", "expiry");
+          else if (test && expiry <= test) bad("The expiry must be after the test date.", "expiry");
+        }
+        if (state.result === "Fail" && !lines(state.fails).length) bad("Add at least one reason for failure.", "fails");
+        if (!(miles >= 0)) bad("Type the mileage from the certificate.", "miles");
+        else if (v && v.last_mot_mileage && miles < v.last_mot_mileage) bad(`The mileage is lower than at the last MOT (${fmtNum(v.last_mot_mileage)}) – check the certificate.`, "miles");
+        if (!state.centre) bad("Choose the test centre.", "centre");
+        if (errors.length) {
+          err.innerHTML = errors.map(x => esc(x.msg)).join("<br>");
+          const first = errors[0].field;
+          const el = f.elements[first] || f.querySelector(first);
+          if (el) el.focus();
+          return;
+        }
+
+        const btn = f.querySelector("[type=submit]");
+        btn.disabled = true; btn.textContent = "Checking…";
+        // What the rules say, the odometer on the day, and the newest test (to catch two people logging the same one)
+        const [rule, odo, snap] = await Promise.all([
+          state.result === "Pass" ? NB.db.rpc("mot_expiry_for", { p_vehicle_id: v.id, p_test_date: test }) : Promise.resolve({ data: null }),
+          NB.db.from("daily_mileage").select("odometer").eq("vehicle_id", v.id).lte("day", test).order("day", { ascending: false }).limit(1),
+          NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false }).limit(1)
+        ]);
+        btn.disabled = false; btn.textContent = "Check answers";
+        const flags = {}, warnings = [];
+        const warn = (field, msg) => { flags[field] = true; warnings.push(msg); };
+        if (state.result === "Pass" && rule.data && expiry !== rule.data) {
+          warn("expiry", `You typed <strong>${NB.fmtDate(expiry)}</strong>. The MOT rules would normally give <strong>${NB.fmtDate(rule.data)}</strong>. If the certificate says ${NB.fmtDate(expiry)}, save it as it is.`);
+        }
+        if (state.result === "Pass" && v.due_date > test) {
+          const keep = NB.parseDate(v.due_date); keep.setMonth(keep.getMonth() - 1); keep.setDate(keep.getDate() + 1);
+          if (NB.parseDate(test) < keep) warn("test", `Tested more than a month before the old expiry (${NB.fmtDate(v.due_date)}), so about ${NB.daysBetween(test, v.due_date) - 1} days of MOT are lost.`);
+        }
+        const odoDay = odo.data && odo.data[0] ? odo.data[0].odometer : null;
+        if (odoDay && miles < odoDay - 50) warn("miles", `The mileage is lower than the van's odometer on that day (${fmtNum(odoDay)}).`);
+        else if (odoDay && miles > odoDay + 500) warn("miles", `The mileage is ${fmtNum(miles - odoDay)} more than the van's odometer on that day (${fmtNum(odoDay)}).`);
+        if (v.booking_date && test < v.booking_date) warn("test", `The test date is before the booking (${NB.fmtDate(v.booking_date)}).`);
+        if (v.last_test_date && test <= v.last_test_date) warn("test", `There's already an MOT logged for ${NB.fmtDate(v.last_test_date)} – is this a new one?`);
+
+        const centreName = (c.centres.find(x => String(x.id) === state.centre) || {}).name || "";
+        const rows = [
+          ["Reg", `<span class="reg">${esc(v.registration)}</span>`, "reg"],
+          ["Result", state.result === "Pass" ? '<span class="stage stage--green">Pass</span>' : '<span class="stage stage--red">Fail</span>', ".result-tile"],
+          ["Test date", NB.fmtDay(test), "test"],
+          ...(state.result === "Pass" ? [["Expiry date", NB.fmtDay(expiry) + (flags.expiry ? ' <span class="text-warn" aria-label="please check">⚠</span>' : ""), "expiry"]]
+                                      : [["Failed on", lines(state.fails).map(esc).join("<br>"), "fails"]]),
+          ["Mileage", fmtNum(miles) + (flags.miles ? ' <span class="text-warn" aria-label="please check">⚠</span>' : ""), "miles"],
+          ["Test centre", esc(centreName), "centre"],
+          ["Advisories", lines(state.adv).length ? lines(state.adv).map(esc).join("<br>") : '<span class="muted">None</span>', "adv"]
+        ];
+        const after = state.result === "Pass"
+          ? `Saving closes the booking${v.booking_date ? " for " + NB.fmtDay(v.booking_date, true) : ""}${v.status === "Overdue" ? ` and takes ${esc(v.registration)} off VOR` : ""}.`
+          : `Saving closes the booking and puts ${esc(v.registration)} on the list for a retest. The old expiry (${NB.fmtDate(v.due_date)}) still stands.`;
+
+        steps(2);
+        root.innerHTML = `<div class="panel__body">
+            ${warnings.length ? `<div class="warnbox" role="alert"><div class="warnbox__title">Please check</div>${warnings.map(w => `<div>${w}</div>`).join("")}</div>` : ""}
+            <dl class="summary">${rows.map(([k, val, field]) => {
+              const fl = (field === "expiry" && flags.expiry) || (field === "miles" && flags.miles) || (field === "test" && flags.test) ? " flag" : "";
+              return `<dt class="${fl}">${k}</dt><dd class="${fl}">${val}</dd><dd class="chg${fl}"><button class="linkish" type="button" data-change="${field}">Change<span class="visually-hidden"> ${k}</span></button></dd>`;
+            }).join("")}</dl>
+            <p class="work-note">${after}</p>
+            <div class="errbox" data-err2 role="alert"></div>
+          </div>
+          <div class="panel__foot">
+            <button class="btn btn--primary" type="button" data-confirm>Confirm and save</button>
+            <button class="btn btn--ghost" type="button" data-back>Back to edit</button>
+          </div>`;
+        root.querySelectorAll("[data-change]").forEach(b => b.addEventListener("click", () => edit(b.dataset.change)));
+        root.querySelector("[data-back]").addEventListener("click", () => edit());
+        const confirm = root.querySelector("[data-confirm]");
+        confirm.focus();
+        confirm.addEventListener("click", async () => {
+          const err2 = root.querySelector("[data-err2]");
+          confirm.disabled = true; confirm.textContent = "Saving…";
+          const now = await NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false }).limit(1);
+          const before = snap.data && snap.data[0] ? snap.data[0].id : 0, latest = now.data && now.data[0] ? now.data[0].id : 0;
+          if (latest !== before) {
+            err2.innerHTML = `Someone has just logged an MOT for ${esc(v.registration)}. <strong>Nothing has been saved.</strong> Close this and check whether another is still needed.`;
+            confirm.textContent = "Confirm and save";
+            return;
+          }
+          const r = await NB.db.rpc("record_mot", {
+            p_registration: v.registration, p_test_date: test, p_result: state.result, p_mileage: miles,
+            p_centre_id: +state.centre, p_advisories: lines(state.adv).join("|"),
+            p_failure_reasons: state.result === "Fail" ? lines(state.fails).join("|") : "",
+            p_expiry_date: state.result === "Pass" ? expiry : null, p_person: m.person.code });
+          if (r.error) { err2.textContent = NB.friendlyError(r.error); confirm.disabled = false; confirm.textContent = "Confirm and save"; return; }
+          logDirty = true;
+          await reload();
+          saved(v.registration, state.result, expiry, lines(state.adv).length);
+        });
+      }
+
+      /* ---- step 3: saved ---- */
+      function saved(reg, result, expiry, nAdv) {
+        steps(3);
+        const nv = c.vehicleByReg.get(reg);
+        root.innerHTML = `<div class="panel__body"><div class="saved">
+            <div class="saved__tick">${TICK.replace('stroke-width="3"', 'stroke-width="2.5" width="20" height="20"')}</div>
+            <div class="saved__title">MOT saved for <span class="reg">${esc(reg)}</span></div>
+            <div class="muted">${result === "Pass"
+              ? `Pass · valid to ${NB.fmtDate(expiry)}${nAdv ? ` · ${nAdv} advisor${nAdv === 1 ? "y" : "ies"}` : ""}`
+              : `Fail · now on the list for a retest · old expiry ${NB.fmtDate(nv.due_date)} still stands`}</div>
+          </div></div>
+          <div class="panel__foot">
+            <button class="btn btn--primary" type="button" data-again>Log another MOT</button>
+            <button class="btn btn--ghost" type="button" data-done>${opts.mode === "panel" ? "Back to where I was" : "Back to MOTs"}</button>
+          </div>`;
+        updateBadge();
+        root.querySelector("[data-again]").focus();
+        root.querySelector("[data-again]").addEventListener("click", () => {
+          Object.assign(state, { reg: "", result: "", test: "", expiry: "", miles: "", centre: "", adv: "", fails: "", fromDvsa: false, centreFromBooking: false });
+          edit();
+        });
+        root.querySelector("[data-done]").addEventListener("click", opts.close);
+      }
+
+      edit();
     }
 
-    /* Result panel: same care as the old FleetHub form – check, warnings, confirm, clash check */
-    const DAYNUMS = Array.from({ length: 31 }, (_, i) => i + 1);
-    async function openResultPanel(tr, reg, check) {
-      const open = tr.nextElementSibling;
-      if (open && open.classList.contains("panel-row")) { open.remove(); return; }
-      main.querySelectorAll("tr.panel-row").forEach(p => p.remove());
-      const v = c.vehicleByReg.get(reg);
-      const isSvc = check === "service";
-      const s = S(v, check);
-      const testDay = s.booking_date && s.booking_date <= today() ? s.booking_date : today();
-      // Snapshot: the newest record id now, so we can tell if someone else logs one before we save
-      const snapQ = isSvc
-        ? NB.db.from("service_records").select("id").eq("vehicle_id", v.id).order("id", { ascending: false })
-        : NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false });
-      const snap = await snapQ;
-      const snapshotId = snap.data && snap.data[0] ? snap.data[0].id : 0;
+    /* ---------------- BOOK: side panel (MOT or service) ---------------- */
 
-      const row = document.createElement("tr");
-      row.className = "panel-row";
+    function openBook(reg, kind) {
+      const isSvc = kind === "service";
+      const v = c.vehicleByReg.get(reg);
+      const s = S(v, kind);
+      const retest = !isSvc && v.retest;
+      const title = s.booked && !s.awaiting_result ? `Change ${isSvc ? "service" : "MOT"} booking` : isSvc ? "Book service" : retest ? "Book retest" : "Book MOT";
+      const p = NB.openPanel(title);
+      const daysLeft = isSvc ? NB.daysBetween(today(), s.effective_due_date) : v.days_to_due;
+      const suggest = s.booked && s.booking_date >= today() ? s.booking_date : NB.isoToday(daysLeft > 3 ? Math.min(daysLeft - 2, 14) : 1);
       const opts = isSvc ? c.providers : c.centres;
       const usual = isSvc ? s.booking_provider : s.booking_centre;
-      const placeOpts = opts.map(o => `<option value="${o.id}"${o.name === usual ? " selected" : ""}>${esc(o.name)}</option>`).join("");
-      const yearNow = new Date().getFullYear();
-      row.innerHTML = `<td colspan="4"><form class="result-panel" novalidate>
-        <h3>${isSvc ? "Log service" : "Log MOT result"} – <span class="reg">${esc(reg)}</span></h3>
-        <div class="result-edit">
-          <div class="field-row">
-            <div class="field"><label>${isSvc ? "Service date" : "Test date"}</label>
-              <input class="input" name="date" type="date" value="${testDay}" max="${today()}" min="${NB.isoToday(-90)}"></div>
-            <div class="field"><label>${isSvc ? "Type" : "Result"}</label>
-              <div class="segmented" role="group">${isSvc
-                ? ["Interim", "Full"].map(t => `<button type="button" data-pick="${t}" aria-pressed="${t === (s.last_service_type === "Interim" ? "Full" : "Interim")}">${t}</button>`).join("")
-                : ["Pass", "Fail"].map(t => `<button type="button" data-pick="${t}" aria-pressed="${t === "Pass"}">${t}</button>`).join("")}</div></div>
-            <div class="field"><label>${isSvc ? "Odometer" : "Mileage on certificate"}</label>
-              <input class="input" name="miles" type="number" inputmode="numeric" min="0" value="${v.odometer ? v.odometer + 10 : ""}">
-              <div class="field__hint">Odometer yesterday: ${fmtNum(v.odometer)}</div></div>
-            <div class="field"><label>${isSvc ? "Workshop" : "Test centre"}</label><select class="input" name="place">${placeOpts}</select></div>
-          </div>
-          ${isSvc ? `
-          <div class="field-row">
-            <div class="field"><label>Labour (£)</label><input class="input" name="labour" type="number" min="0" step="0.01"></div>
-            <div class="field"><label>Parts (£)</label><input class="input" name="parts" type="number" min="0" step="0.01"></div>
-          </div>
-          <div class="field"><label>Defects found and fixed <span class="muted">(one per line, optional)</span></label><textarea name="notes" rows="2"></textarea></div>`
-          : `
-          <div class="field" data-expiry>
-            <label>New expiry date <span class="muted">(from the certificate)</span></label>
-            <div class="row" style="flex-wrap:nowrap">
-              <select class="input" name="eday" aria-label="Day">${DAYNUMS.map(d => `<option>${d}</option>`).join("")}</select>
-              <select class="input" name="emonth" aria-label="Month">${MONTHS.map((mo, i) => `<option value="${i + 1}">${mo}</option>`).join("")}</select>
-              <select class="input" name="eyear" aria-label="Year">${[yearNow, yearNow + 1, yearNow + 2].map(y => `<option>${y}</option>`).join("")}</select>
-            </div>
-            <div class="field__hint" data-expiry-hint>Filled in using the MOT rules – change it if the certificate differs.</div>
-          </div>
-          <div class="field" data-fails hidden><label>Reasons for failure <span class="muted">(one per line)</span></label><textarea name="fails" rows="2"></textarea></div>
-          <div class="field"><label>Advisories <span class="muted">(one per line, optional)</span></label><textarea name="notes" rows="2"></textarea></div>`}
-          <p class="field__error" data-err role="alert"></p>
-          <div class="row"><button class="btn btn--primary" type="submit">Check</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
-        </div>
-        <div class="result-check" hidden></div>
-      </form></td>`;
-      tr.after(row);
-      const f = row.querySelector("form");
-      const $f = n => f.elements[n];
-      let pick = f.querySelector('[data-pick][aria-pressed="true"]').dataset.pick;
-      f.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
-        pick = b.dataset.pick;
-        f.querySelectorAll("[data-pick]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-        if (!isSvc) {
-          f.querySelector("[data-expiry]").hidden = pick === "Fail";
-          f.querySelector("[data-fails]").hidden = pick !== "Fail";
-        } else {
-          if (!$f("labour").dataset.touched) $f("labour").value = pick === "Full" ? 295 : 185;
-          if (!$f("parts").dataset.touched) $f("parts").value = pick === "Full" ? 165 : 85;
-        }
-      }));
-      if (isSvc) {
-        ["labour", "parts"].forEach(n => $f(n).addEventListener("input", () => { $f(n).dataset.touched = "1"; }));
-        f.querySelector('[data-pick][aria-pressed="true"]').click();
-      }
-      // MOT: suggest the expiry for the chosen test date
-      let suggestedExpiry = null;
-      async function suggest() {
-        if (isSvc) return;
-        const r = await NB.db.rpc("mot_expiry_for", { p_vehicle_id: v.id, p_test_date: $f("date").value });
-        if (r.error || !r.data) return;
-        suggestedExpiry = r.data;
-        const d = NB.parseDate(r.data);
-        $f("eday").value = String(d.getDate()); $f("emonth").value = String(d.getMonth() + 1);
-        if (![...$f("eyear").options].some(o => o.value === String(d.getFullYear()))) $f("eyear").add(new Option(d.getFullYear()));
-        $f("eyear").value = String(d.getFullYear());
-      }
-      if (!isSvc) { $f("date").addEventListener("change", suggest); suggest(); }
-      f.querySelector("[data-cancel]").addEventListener("click", () => row.remove());
-      f.querySelector('[name="miles"]').focus();
-
-      const lines = t => (t || "").split("\n").map(x => x.trim()).filter(Boolean);
-      let pending = null;
-
-      f.addEventListener("submit", e => {
+      const pick = opts.find(o => o.name === usual) || opts.find(o => o.name.startsWith(v.base_name)) || opts[0];
+      p.el.innerHTML = `<form novalidate style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="panel__body"><div class="lf">
+          <div><span class="reg" style="font-size:1.05rem">${esc(reg)}</span>
+            <div class="lf-hint">${isSvc ? svcWhat(s) : motWhat(v)}${s.booked && !s.awaiting_result ? ` · booked ${NB.fmtDay(s.booking_date, true)}` : ""}</div></div>
+          <div class="field"><label for="bkDate">Date</label>
+            <input class="input" id="bkDate" type="date" value="${suggest}" min="${today()}" max="${NB.isoToday(120)}" required>
+            <div class="lf-hint" data-prev></div></div>
+          <div class="field"><label for="bkWhere">${isSvc ? "Workshop" : "Test centre"}</label>
+            <select class="input" id="bkWhere">${opts.map(o => `<option value="${o.id}"${o.id === pick.id ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></div>
+          <div class="field"><label for="bkNotes">Notes <span class="muted">(optional)</span></label>
+            <input class="input" id="bkNotes" type="text" maxlength="500" value="${s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "Off the road until MOT") : ""}"></div>
+          <div class="errbox" data-err role="alert"></div>
+        </div></div>
+        <div class="panel__foot"><button class="btn btn--primary" type="submit">Book</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
+      </form>`;
+      const f = p.el.querySelector("form"), d = f.querySelector("#bkDate");
+      const prev = () => { f.querySelector("[data-prev]").textContent = d.value ? NB.fmtDay(d.value) + (d.value === today() ? " – today" : "") : ""; };
+      d.addEventListener("input", prev); prev();
+      f.querySelector("[data-cancel]").addEventListener("click", p.close);
+      d.focus();
+      f.addEventListener("submit", async e => {
         e.preventDefault();
         const err = f.querySelector("[data-err]");
         err.textContent = "";
-        const date = $f("date").value, miles = parseInt($f("miles").value, 10);
-        const errors = [], warnings = [];
-        if (!date) errors.push(`Enter the ${isSvc ? "service" : "test"} date.`);
-        else if (date > today()) errors.push("The date can't be in the future.");
-        if (!(miles >= 0)) errors.push(isSvc ? "Enter the odometer reading." : "Enter the mileage from the certificate.");
-        let expiry = null;
-        if (!isSvc && pick === "Pass") {
-          const y = +$f("eyear").value, mo = +$f("emonth").value, d = +$f("eday").value;
-          const dt = new Date(y, mo - 1, d);
-          if (dt.getMonth() !== mo - 1) errors.push("That expiry day doesn't exist in that month.");
-          else {
-            expiry = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-            if (date) {
-              const months = (NB.parseDate(expiry) - NB.parseDate(date)) / (30.44 * 864e5);
-              if (expiry <= date) errors.push("The expiry must be after the test date.");
-              else if (months < 11) warnings.push("The new expiry is less than 11 months after the test.");
-              else if (months > 13) warnings.push("The new expiry is more than 13 months after the test.");
-            }
-            if (suggestedExpiry && expiry !== suggestedExpiry) warnings.push(`The MOT rules would give ${fmtDate(suggestedExpiry)} – check the certificate.`);
-            // Tested more than a month before the old expiry: the van loses some MOT time
-            if (date && v.due_date > date) {
-              const keep = new Date(NB.parseDate(v.due_date)); keep.setMonth(keep.getMonth() - 1); keep.setDate(keep.getDate() + 1);
-              if (NB.parseDate(date) < keep) {
-                const lost = Math.round((NB.parseDate(v.due_date) - NB.parseDate(date)) / 864e5) - 1;
-                warnings.push(`Tested more than a month before the old expiry (${fmtDate(v.due_date)}), so about ${lost} days of MOT are lost.`);
-              }
-            }
-          }
-        }
-        if (!isSvc && pick === "Fail" && !lines($f("fails").value).length) errors.push("Add at least one reason for failure.");
-        if (miles >= 0 && v.odometer) {
-          if (miles < v.odometer) warnings.push(`That's lower than yesterday's odometer (${fmtNum(v.odometer)}).`);
-          if (miles > v.odometer + 500) warnings.push(`That's ${fmtNum(miles - v.odometer)} miles more than yesterday's odometer.`);
-        }
-        if (s.booking_date && date && date < s.booking_date) warnings.push(`That's before the booking (${fmtDate(s.booking_date)}).`);
-        if (isSvc) {
-          const cost = (+$f("labour").value || 0) + (+$f("parts").value || 0);
-          if (cost > 1500) warnings.push(`£${fmtNum(cost)} is a lot for a service – check the invoice.`);
-          if (s.last_service_type && pick === s.last_service_type) warnings.push(`The last service was also ${pick.toLowerCase()} – they usually alternate.`);
-        }
-        if (errors.length) { err.innerHTML = errors.map(esc).join("<br>"); return; }
-
-        pending = isSvc
-          ? { fn: "record_service", args: {
-                p_registration: reg, p_service_date: date, p_odometer: miles, p_service_type: pick,
-                p_provider_id: +$f("place").value,
-                p_work_done: pick === "Full" ? "Oil and filter change|Air and fuel filters|Brake fluid check|Full safety inspection" : "Oil and filter change|Safety inspection",
-                p_defects: lines($f("notes").value).join("|"),
-                p_labour_cost: +$f("labour").value || 0, p_parts_cost: +$f("parts").value || 0, p_person: m.person.code } }
-          : { fn: "record_mot", args: {
-                p_registration: reg, p_test_date: date, p_result: pick, p_mileage: miles,
-                p_centre_id: +$f("place").value, p_advisories: lines($f("notes").value).join("|"),
-                p_failure_reasons: pick === "Fail" ? lines($f("fails").value).join("|") : "",
-                p_expiry_date: expiry, p_person: m.person.code } };
-        const place = $f("place").selectedOptions[0].textContent;
-        const summary = isSvc
-          ? [["Vehicle", reg], ["Service date", fmtDate(date)], ["Type", pick], ["Odometer", fmtNum(miles)], ["Workshop", place],
-             ["Defects fixed", lines($f("notes").value).join("; ") || "None"],
-             ["Cost", "£" + fmtNum((+$f("labour").value || 0) + (+$f("parts").value || 0))]]
-          : [["Vehicle", reg], ["Test date", fmtDate(date)], ["Result", pick],
-             ["New expiry", pick === "Pass" ? fmtDate(expiry) : "Not applicable – the old expiry stands"],
-             ["Mileage", fmtNum(miles)], ["Test centre", place],
-             ...(pick === "Fail" ? [["Failed on", lines($f("fails").value).join("; ")]] : []),
-             ["Advisories", lines($f("notes").value).join("; ") || "None"]];
-        summary.push(["Recorded by", m.person.name]);
-        const box = f.querySelector(".result-check");
-        box.innerHTML = `
-          ${warnings.length ? `<div class="alert alert--warn"><strong>Please check before saving:</strong>${warnings.map(esc).join("<br>")}</div>` : ""}
-          <dl class="facts" style="margin:var(--space-3) 0">${summary.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}</dl>
-          <p class="field__error" data-err2 role="alert"></p>
-          <div class="row"><button class="btn btn--go" type="button" data-confirm>Confirm and save</button>
-            <button class="btn btn--ghost" type="button" data-edit>Back to edit</button></div>`;
-        f.querySelector(".result-edit").hidden = true;
-        box.hidden = false;
-        box.querySelector("[data-confirm]").focus();
-        box.querySelector("[data-edit]").addEventListener("click", () => { box.hidden = true; f.querySelector(".result-edit").hidden = false; });
-        box.querySelector("[data-confirm]").addEventListener("click", async ev => {
-          const btn = ev.currentTarget, err2 = box.querySelector("[data-err2]");
-          btn.disabled = true;
-          // Clash check: has anyone logged a record for this van since the panel opened?
-          const now = await (isSvc
-            ? NB.db.from("service_records").select("id").eq("vehicle_id", v.id).order("id", { ascending: false })
-            : NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false }));
-          const latest = now && now.data && now.data[0] ? now.data[0].id : 0;
-          if (latest !== snapshotId) {
-            err2.innerHTML = `Someone has logged a ${isSvc ? "service" : "MOT"} for ${esc(reg)} since you opened this. <strong>Nothing has been saved.</strong> Refresh and check whether another is still needed.`;
-            return;
-          }
-          const r = await NB.db.rpc(pending.fn, pending.args);
-          if (r.error) { err2.textContent = NB.friendlyError(r.error); btn.disabled = false; return; }
-          await reload();
-          const nv = c.vehicleByReg.get(reg);
-          flash = isSvc
-            ? `<strong>Saved</strong>${esc(reg)} serviced – next due at ${fmtNum(nv.svc.due_odometer)} miles or ${fmtDate(nv.svc.due_date)}.`
-            : pick === "Pass"
-              ? `<strong>Saved</strong>${esc(reg)} passed – MOT now due ${fmtDate(nv.due_date)}.`
-              : `<strong>Saved</strong>${esc(reg)} failed – it's back in “To book” as a retest. The old expiry (${fmtDate(nv.due_date)}) still stands.`;
-          render();
-        });
+        if (!d.value || d.value < today()) { err.textContent = "Pick a date from today on."; d.focus(); return; }
+        if (d.value > NB.isoToday(120)) { err.textContent = "That's more than 4 months away – check the date."; d.focus(); return; }
+        const where = f.querySelector("#bkWhere");
+        const args = { p_registration: reg, p_date: d.value, p_notes: f.querySelector("#bkNotes").value, p_person: m.person.code };
+        if (isSvc) args.p_provider_id = +where.value; else args.p_centre_id = +where.value;
+        const btn = f.querySelector("[type=submit]");
+        btn.disabled = true; btn.textContent = "Booking…";
+        const r = await NB.db.rpc(isSvc ? "book_service" : "book_mot", args);
+        if (r.error) { err.textContent = NB.friendlyError(r.error); btn.disabled = false; btn.textContent = "Book"; return; }
+        await reload();
+        p.close();
+        render();
+        toast(`Booked <strong>${esc(reg)}</strong> – ${isSvc ? "service" : retest ? "retest" : "MOT"} ${NB.fmtDay(d.value, true)} at ${esc(where.selectedOptions[0].textContent)}`);
       });
     }
 
@@ -890,13 +1120,12 @@
       const svcCost12 = svcHist.filter(h => h.service_date >= yearAgo).reduce((t, h) => t + Number(h.total_cost || 0), 0);
 
       const actions = (kind, booked) => {
-        const rec = link(kind === "service" ? "record-service" : "record", { reg: v.registration });
         const word = kind === "service" ? "service" : "MOT";
-        return !canRecord ? "" : `<div class="row">${booked
-          ? `<a class="btn btn--primary" href="${rec}">Record ${word}</a>
-             <button class="link-btn" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Change booking</button>`
-          : `<button class="btn btn--primary" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Book ${word}</button>
-             <a class="link-btn" href="${rec}">Record ${word}</a>`}</div>`;
+        const logBtn = `<button class="btn ${booked ? "btn--primary" : "btn--ghost"}" type="button" data-log="${esc(v.registration)}" data-kind="${kind}">Log ${kind === "service" ? "service" : "MOT result"}</button>`;
+        const bookBtn = booked
+          ? `<button class="linkish" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Change booking</button>`
+          : `<button class="btn btn--primary" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Book ${word}</button>`;
+        return !canRecord ? "" : `<div class="row">${booked ? logBtn + bookBtn : bookBtn + logBtn}</div>`;
       };
 
       main.innerHTML = flashHtml() + `
@@ -1000,11 +1229,8 @@
           : `<div class="empty">No MOTs yet – the first is due ${fmtDate(v.due_date)}, 3 years after first registration.</div>`}`;
       wireTable();
     }
-
-    /* ---------------- RECORD AN MOT ---------------- */
-
     function notAllowed(what) {
-      main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="alert alert--warn"><strong>Not available</strong>A ${esc(m.role.label)} can view ${what} but not record them.</div>`;
+      main.innerHTML = `<div class="alert alert--warn"><strong>Not available</strong>A ${esc(m.role.label)} can view ${what} but not record them.</div>`;
     }
     function vehicleOptions(reg) {
       const regs = c.vehicles.filter(x => m.scope.level === "company" ||
@@ -1012,136 +1238,15 @@
       return `<option value="">Choose…</option>` + regs.map(x =>
         `<option value="${esc(x.registration)}"${x.registration === reg ? " selected" : ""}>${esc(x.registration)} – ${esc(x.make)} ${esc(x.model)} (${esc(x.base_name)})</option>`).join("");
     }
-
-    function renderRecord(q) {
-      setNav("");
-      if (!m.role.can_record) return notAllowed("MOTs");
-      const reg = (q.get("reg") || "").toUpperCase();
-      main.innerHTML = `
-        <a class="back-link" href="javascript:history.back()">Back</a>
-        <h1>Record an MOT</h1>
-        <form id="motForm" class="form-panel" style="max-width:var(--width-narrow)" novalidate>
-          <div class="field-row">
-            <div class="field">
-              <label for="fReg">Vehicle</label>
-              <select id="fReg" required>${vehicleOptions(reg)}</select>
-              <div id="fRegHint" class="field__hint"></div>
-            </div>
-            <div class="field">
-              <label for="fDate">Test date</label>
-              <input id="fDate" type="date" required value="${NB.isoToday()}" max="${NB.isoToday()}" min="${NB.isoToday(-90)}">
-            </div>
-          </div>
-          <fieldset class="field" style="border:0;padding:0;margin:0">
-            <legend class="label">Result</legend>
-            <div class="segmented" role="group" aria-label="Result">
-              <button type="button" data-result="Pass" aria-pressed="true">Pass</button>
-              <button type="button" data-result="Fail" aria-pressed="false">Fail</button>
-            </div>
-          </fieldset>
-          <div class="field-row">
-            <div class="field">
-              <label for="fMileage">Mileage</label>
-              <input id="fMileage" type="number" inputmode="numeric" min="0" step="1" required>
-              <div id="fMileageHint" class="field__hint"></div>
-            </div>
-            <div class="field">
-              <label for="fCentre">Test centre</label>
-              <select id="fCentre">${c.centres.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
-            </div>
-          </div>
-          <div class="field" id="expiryField">
-            <label for="fExpiry">Expiry date (from the certificate)</label>
-            <input id="fExpiry" type="date">
-            <div class="field__hint">Filled in for you using the MOT rules – change it if the certificate says otherwise.</div>
-          </div>
-          <div class="field" id="failField" hidden>
-            <label for="fFails">Reasons for failure <span class="muted">(one per line)</span></label>
-            <textarea id="fFails"></textarea>
-          </div>
-          <div class="field">
-            <label for="fAdv">Advisories <span class="muted">(one per line, optional)</span></label>
-            <textarea id="fAdv"></textarea>
-          </div>
-          <p class="small muted">Will be recorded by <strong>${esc(m.person.name)}</strong>, with today's date and time.</p>
-          <p id="formError" class="field__error" role="alert"></p>
-          <div class="row">
-            <button class="btn btn--go" type="submit">Save MOT</button>
-            <a class="btn btn--ghost" href="javascript:history.back()">Cancel</a>
-          </div>
-        </form>`;
-
-      const $ = id => document.getElementById(id);
-      let result = "Pass";
-      const vehicle = () => c.vehicleByReg.get($("fReg").value);
-
-      async function updateExpiry() {
-        const ve = vehicle();
-        if (result !== "Pass" || !ve || !$("fDate").value) return;
-        const r = await NB.db.rpc("mot_expiry_for", { p_vehicle_id: ve.id, p_test_date: $("fDate").value });
-        if (!r.error && r.data) $("fExpiry").value = r.data;
-      }
-      function updateVehicle() {
-        const ve = vehicle();
-        $("fRegHint").textContent = ve ? `MOT ${ve.status === "Overdue" ? "expired" : "due"} ${fmtDate(ve.due_date)} (${daysText(ve.days_to_due)})` : "";
-        $("fMileageHint").textContent = ve && ve.odometer ? `Odometer at end of yesterday: ${fmtNum(ve.odometer)}` : "";
-        if (ve && ve.odometer && !$("fMileage").value) $("fMileage").value = ve.odometer + 12;
-        if (ve && ve.booking_centre) {
-          const cen = c.centres.find(x => x.name === ve.booking_centre);
-          if (cen) $("fCentre").value = cen.id;
-        }
-        updateExpiry();
-      }
-      main.querySelectorAll("[data-result]").forEach(b => b.addEventListener("click", () => {
-        result = b.dataset.result;
-        main.querySelectorAll("[data-result]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-        $("expiryField").hidden = result !== "Pass";
-        $("failField").hidden = result !== "Fail";
-        updateExpiry();
-      }));
-      $("fReg").addEventListener("change", () => { $("fMileage").value = ""; updateVehicle(); });
-      $("fDate").addEventListener("change", updateExpiry);
-      updateVehicle();
-
-      $("motForm").addEventListener("submit", async e => {
-        e.preventDefault();
-        const err = $("formError");
-        err.textContent = "";
-        const ve = vehicle();
-        const mileage = parseInt($("fMileage").value, 10);
-        if (!ve) { err.textContent = "Choose the vehicle."; $("fReg").focus(); return; }
-        if (!$("fDate").value) { err.textContent = "Enter the test date."; return; }
-        if (!(mileage >= 0)) { err.textContent = "Enter the mileage from the certificate."; $("fMileage").focus(); return; }
-        if (result === "Fail" && !$("fFails").value.trim()) { err.textContent = "Add at least one reason for failure."; $("fFails").focus(); return; }
-        const btn = $("motForm").querySelector("[type=submit]");
-        btn.disabled = true;
-        const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean).join("|");
-        const r = await NB.db.rpc("record_mot", {
-          p_registration: ve.registration, p_test_date: $("fDate").value, p_result: result,
-          p_mileage: mileage, p_centre_id: +$("fCentre").value,
-          p_advisories: lines($("fAdv").value), p_failure_reasons: lines($("fFails").value),
-          p_expiry_date: result === "Pass" && $("fExpiry").value ? $("fExpiry").value : null,
-          p_person: m.person.code
-        });
-        btn.disabled = false;
-        if (r.error) { err.textContent = NB.friendlyError(r.error); return; }
-        await reload();
-        flash = result === "Pass"
-          ? `<strong>MOT saved</strong>${esc(ve.registration)} passed – now due ${fmtDate(c.vehicleByReg.get(ve.registration).due_date)}. Every dashboard has updated.`
-          : `<strong>MOT saved</strong>${esc(ve.registration)} failed – the old expiry date still stands.`;
-        location.replace(link("van/" + ve.registration));
-      });
-    }
-
     /* ---------------- RECORD A SERVICE ---------------- */
 
     function renderRecordService(q) {
-      setNav("");
+      setNav("work");
       if (!m.role.can_record) return notAllowed("services");
       const reg = (q.get("reg") || "").toUpperCase();
       main.innerHTML = `
-        <a class="back-link" href="javascript:history.back()">Back</a>
-        <h1>Record a service</h1>
+        <a class="back-link" href="#/${esc(q.get("back") || "work?check=service")}">Back</a>
+        <h1>Log a service</h1>
         <form id="svcForm" class="form-panel" style="max-width:var(--width-narrow)" novalidate>
           <div class="field-row">
             <div class="field">
@@ -1191,7 +1296,7 @@
           <p id="sError" class="field__error" role="alert"></p>
           <div class="row">
             <button class="btn btn--go" type="submit">Save service</button>
-            <a class="btn btn--ghost" href="javascript:history.back()">Cancel</a>
+            <a class="btn btn--ghost" href="#/${esc(q.get("back") || "work?check=service")}">Cancel</a>
           </div>
         </form>`;
 
@@ -1244,87 +1349,25 @@
         if (r.error) { err.textContent = NB.friendlyError(r.error); return; }
         await reload();
         const ns = c.vehicleByReg.get(ve.registration).svc;
-        flash = `<strong>Service saved</strong>${esc(ve.registration)} – next due at ${fmtNum(ns.due_odometer)} miles or ${fmtDate(ns.due_date)}. Every dashboard has updated.`;
-        location.replace(link("van/" + ve.registration));
+        toast(`Service saved for <strong>${esc(ve.registration)}</strong> – next due at ${fmtNum(ns.due_odometer)} miles or ${fmtDate(ns.due_date)}`);
+        location.replace("#/" + (q.get("back") || "work?check=service"));
       });
     }
-
-    /* ---------------- BOOK (dialog, MOT or service) ---------------- */
-
-    const dlg = document.getElementById("bookDialog");
-    let bookReg = null, bookKind = "mot";
-    function openBook(reg, kind) {
-      bookKind = kind;
-      const isSvc = kind === "service";
-      const vehField = document.getElementById("bookVehField"), vehSel = document.getElementById("bookVeh");
-      if (!reg) {
-        // Opened from "Book an MOT / a service": choose the van, ones needing booking first
-        const mine = c.vehicles.filter(x => inView(x, defaultView()));
-        const needs = x => { const st = S(x, kind); return st.status !== "OK" && !st.booked; };
-        const sorted = mine.filter(needs).sort((a, b) => dueSort(a, b, kind)).concat(mine.filter(x => !needs(x)).sort((a, b) => a.registration.localeCompare(b.registration)));
-        vehSel.innerHTML = sorted.map(x => {
-          const st = S(x, kind);
-          const note = needs(x) ? ` – ${st.status.toLowerCase()}, not booked` : st.booked ? ` – booked ${fmtDate(st.booking_date)}` : "";
-          return `<option value="${esc(x.registration)}">${esc(x.registration)} (${esc(x.base_name)})${note}</option>`;
-        }).join("");
-        vehField.hidden = false;
-        vehSel.onchange = () => fillBook(vehSel.value);
-        reg = vehSel.value;
-      } else {
-        vehField.hidden = true;
-      }
-      fillBook(reg);
-      dlg.showModal();
-    }
-    function fillBook(reg) {
-      const kind = bookKind, isSvc = kind === "service";
-      const v = c.vehicleByReg.get(reg);
-      bookReg = reg;
-      const s = isSvc ? v.svc : v;
-      document.getElementById("bookTitle").textContent = (isSvc ? "Book service – " : "Book MOT – ") + reg;
-      document.getElementById("bookCentreLabel").textContent = isSvc ? "Workshop" : "Test centre";
-      const d = document.getElementById("bookDate");
-      d.min = NB.isoToday(); d.max = NB.isoToday(120);
-      const daysLeft = isSvc
-        ? Math.round((NB.parseDate(s.effective_due_date) - NB.parseDate(NB.isoToday())) / 864e5)
-        : v.days_to_due;
-      d.value = s.booking_date || NB.isoToday(daysLeft > 3 ? Math.min(daysLeft - 2, 14) : 1);
-      const opts = isSvc ? c.providers : c.centres;
-      document.getElementById("bookCentre").innerHTML = opts.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
-      document.getElementById("bookNotes").value = s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "Off road until MOT") : "";
-      document.getElementById("bookError").textContent = "";
-    }
-    dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
-    document.getElementById("bookForm").addEventListener("submit", async e => {
-      e.preventDefault();
-      const isSvc = bookKind === "service";
-      const args = {
-        p_registration: bookReg, p_date: document.getElementById("bookDate").value,
-        p_notes: document.getElementById("bookNotes").value, p_person: m.person.code
-      };
-      if (isSvc) args.p_provider_id = +document.getElementById("bookCentre").value;
-      else args.p_centre_id = +document.getElementById("bookCentre").value;
-      const r = await NB.db.rpc(isSvc ? "book_service" : "book_mot", args);
-      if (r.error) { document.getElementById("bookError").textContent = NB.friendlyError(r.error); return; }
-      dlg.close();
-      await reload();
-      flash = `<strong>Booked</strong>${esc(bookReg)} – ${isSvc ? "service" : "MOT"} on ${fmtDate(args.p_date)}.`;
-      render();
-    });
-
     /* ---------------- router ---------------- */
 
-    async function reload() { NB.invalidate(); c = await NB.loadAll(); }
+    async function reload() { NB.invalidate(); c = await NB.loadAll(); passesByVan = null; }
 
     async function render() {
       try {
+        NB.closePanel(true);
         const { parts, q } = parseHash();
         if (parts[0] === "list") renderList(q);
         else if (parts[0] === "van" && parts[1]) await renderVan(parts[1].toUpperCase());
-        else if (parts[0] === "record") renderRecord(q);
+        else if (parts[0] === "log-mot" || parts[0] === "record") renderLogPage(q);
         else if (parts[0] === "record-service") renderRecordService(q);
         else if (parts[0] === "work") renderWork(q);
         else renderHome(q);
+        updateBadge();
         window.scrollTo(0, 0);
       } catch (err) {
         main.innerHTML = `<div class="alert alert--danger"><strong>Something went wrong</strong>${esc(NB.friendlyError(err))}</div>`;
