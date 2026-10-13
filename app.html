@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <link rel="stylesheet" href="dougs.css">
-  <link rel="stylesheet" href="neptsbi.css">
-  <script src="dougs.js"></script>
+  <!-- ?v= makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=3">
+  <link rel="stylesheet" href="neptsbi.css?v=3">
+  <script src="dougs.js?v=3"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js"></script>
+  <script src="neptsbi.js?v=3"></script>
 </head>
 <body>
   <header class="app-header">
@@ -29,18 +30,18 @@
 
   <dialog id="bookDialog" class="dialog" aria-labelledby="bookTitle">
     <form id="bookForm" class="stack" method="dialog">
-      <h2 id="bookTitle">Book MOT</h2>
+      <h2 id="bookTitle">Book</h2>
       <div class="field">
         <label for="bookDate">Appointment date</label>
         <input id="bookDate" type="date" required>
       </div>
       <div class="field">
-        <label for="bookCentre">Test centre</label>
+        <label for="bookCentre" id="bookCentreLabel">Where</label>
         <select id="bookCentre"></select>
       </div>
       <div class="field">
         <label for="bookNotes">Notes <span class="muted">(optional)</span></label>
-        <input id="bookNotes" type="text" maxlength="500" placeholder="e.g. Off road until MOT">
+        <input id="bookNotes" type="text" maxlength="500">
       </div>
       <p id="bookError" class="field__error" role="alert"></p>
       <div class="row">
@@ -59,14 +60,18 @@
     let m = null;      // who is signed in
     let flash = "";    // one-off message shown on the next page
 
-    const CHECKS = [   // rows of the check grid; only MOT is live so far
+    const CHECKS = [   // rows of the check grid
       { key: "mot", label: "MOT", live: true },
-      { key: "service", label: "Service" },
+      { key: "service", label: "Service", live: true },
       { key: "clean", label: "Deep clean" },
       { key: "oxygen", label: "Oxygen" },
       { key: "fire", label: "Fire extinguisher" },
       { key: "defib", label: "Defib" }
     ];
+    const CHECK_NAME = { mot: "MOT", service: "Service" };
+
+    // The status object for one check on one vehicle (MOT lives on the vehicle, service on v.svc)
+    const S = (v, check) => check === "service" ? v.svc : v;
 
     /* ---------------- helpers ---------------- */
 
@@ -124,30 +129,163 @@
       return opts.map(([v, l]) => `<option value="${v}"${v === current ? " selected" : ""}>${esc(l)}</option>`).join("");
     }
 
-    function counts(list) {
-      const overdue = list.filter(v => v.status === "Overdue");
-      const soon = list.filter(v => v.status === "Due soon");
-      const notBooked = list.filter(v => v.status !== "OK" && !v.booked);
-      return { total: list.length, overdue: overdue.length, soon: soon.length, notBooked: notBooked.length,
-               compliance: list.length ? (list.length - overdue.length) / list.length * 100 : 100 };
+    function counts(list, check) {
+      check = check || "mot";
+      const st = list.map(v => S(v, check));
+      const overdue = st.filter(s => s.status === "Overdue").length;
+      return { total: list.length, overdue,
+               soon: st.filter(s => s.status === "Due soon").length,
+               notBooked: st.filter(s => s.status !== "OK" && !s.booked).length,
+               compliance: list.length ? (list.length - overdue) / list.length * 100 : 100 };
+    }
+
+    // "Due" wording for a service: whichever of time or miles comes first
+    function serviceDueText(s) {
+      if (s.miles_left < 0) return `${fmtNum(-s.miles_left)} miles over`;
+      if (s.due_date && s.due_date < NB.isoToday()) {
+        const days = Math.round((NB.parseDate(s.due_date) - NB.parseDate(NB.isoToday())) / 864e5);
+        return `${daysText(days)} (6 months up)`;
+      }
+      return `${fmtNum(s.miles_left)} miles left · by ${fmtDate(s.due_date)}`;
     }
 
     const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    function shortDate(iso) { const d = NB.parseDate(iso); return d.getDate() + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]; }
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    function shortDate(iso) { const d = NB.parseDate(iso); return d.getDate() + " " + MONTHS[d.getMonth()]; }
+    function money(n) { return n == null ? "–" : "£" + Number(n).toLocaleString("en-GB", { maximumFractionDigits: 0 }); }
+
+    function numLink(n, href, tone) {
+      const cls = n === 0 ? "big-num big-num--zero" : "big-num" + (tone ? " big-num--" + tone : "");
+      return `<a class="${cls}" href="${href}" aria-label="${n} – show the list">${n}</a>`;
+    }
+    function cellLink(n, href, cls) {
+      return n ? `<a${cls ? ` class="${cls}"` : ""} href="${href}">${n}</a>` : "0";
+    }
+
+    function setNav(which) {
+      document.querySelectorAll("[data-nav]").forEach(a => {
+        if (a.dataset.nav === which) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+      });
+    }
+
+    function flashHtml() {
+      if (!flash) return "";
+      const html = `<div class="alert alert--ok" role="status">${flash}</div>`;
+      flash = "";
+      return html;
+    }
+
+    /* ---------------- HOME ---------------- */
+
+    function renderHome(q) {
+      setNav("home");
+      if (m.role.key === "driver") return renderDriverHome();
+
+      const view = allowedView(q.get("view"));
+      const list = c.vehicles.filter(v => inView(v, view));
+      const k = counts(list, "mot");
+      const ks = counts(list, "service");
+      const L = (status, check) => link("list", { status, view, check: check === "service" ? "service" : "" });
+      const canChoose = m.scope.level !== "base";
+
+      let html = flashHtml();
+      html += `<div class="row row--between" style="align-items:end">
+          <div>
+            <p class="card__eyebrow">${esc(m.role.label)}</p>
+            <h1 style="margin:0">Vehicle checks – for ${fmtNum(k.total)} vehicles ${view === "all" ? "across" : "at"} ${esc(viewName(view))}</h1>
+          </div>
+          ${canChoose ? `<div class="field" style="min-width:220px">
+              <label for="viewSelect">Showing</label>
+              <select id="viewSelect">${viewOptions(view)}</select>
+            </div>` : ""}
+        </div>`;
+
+      // Headline tiles
+      html += `<div class="tiles" style="margin-top:var(--space-4)">
+        <a class="tile tile--info" href="${L("all")}"><div class="tile__value">${fmtNum(k.total)}</div><div class="tile__label">Vehicles</div></a>
+        <a class="tile ${k.overdue ? "tile--warn" : "tile--ok"}" href="${L("all")}"><div class="tile__value">${k.compliance.toFixed(1)}%</div><div class="tile__label">MOT compliant</div></a>
+        <a class="tile ${k.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue")}"><div class="tile__value">${k.overdue}</div><div class="tile__label">Off road – MOT overdue</div></a>
+        <a class="tile ${ks.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue", "service")}"><div class="tile__value">${ks.overdue}</div><div class="tile__label">Service overdue</div></a>
+      </div>`;
+
+      // The check grid (Doug's Power BI layout)
+      html += `<h2 class="section-title">Checks</h2>
+        <div class="table-wrap"><table class="check-grid">
+          <thead><tr><th scope="col" style="text-align:left">${fmtNum(k.total)} vehicles</th>
+            <th scope="col">Overdue</th><th scope="col">Due soon</th><th scope="col">Not booked</th></tr></thead>
+          <tbody>${CHECKS.map(ch => {
+            if (!ch.live) return `<tr class="soon"><th scope="row">${ch.label}</th>
+                 <td colspan="3"><span class="big-num big-num--na">Coming soon</span></td></tr>`;
+            const kc = counts(list, ch.key);
+            return `<tr><th scope="row">${ch.label}</th>
+                 <td>${numLink(kc.overdue, L("overdue", ch.key), "danger")}</td>
+                 <td>${numLink(kc.soon, L("due", ch.key), "warn")}</td>
+                 <td>${numLink(kc.notBooked, L("notbooked", ch.key), "warn")}</td></tr>`;
+          }).join("")}
+          </tbody></table></div>`;
+
+      html += mileageSection(list, view);
+
+      // Company / region: break down by base
+      if (view === "all" || view.startsWith("r:")) {
+        const regions = c.regions.filter(r => view === "all" || "r:" + r.id === view);
+        const rows = [];
+        regions.forEach(r => {
+          c.bases.filter(b => b.region_id === r.id).forEach(b => {
+            const bv = "b:" + b.id;
+            const bl = list.filter(v => v.base_id === b.id);
+            const bk = counts(bl, "mot"), bs = counts(bl, "service");
+            const LL = (status, check) => link("list", { status, view: bv, check: check === "service" ? "service" : "" });
+            rows.push(`<tr>
+              <td>${esc(r.name)}</td>
+              <td><a href="${link("", { view: bv })}">${esc(b.name)}</a></td>
+              <td class="num"><a href="${LL("all")}">${bk.total}</a></td>
+              <td class="num">${cellLink(bk.overdue, LL("overdue"), "text-danger")}</td>
+              <td class="num">${cellLink(bk.soon, LL("due"))}</td>
+              <td class="num">${cellLink(bs.overdue, LL("overdue", "service"), "text-danger")}</td>
+              <td class="num">${cellLink(bs.soon, LL("due", "service"))}</td>
+              <td class="num">${bk.compliance.toFixed(1)}%</td>
+              <td class="num"><a href="${link("list", { status: "all", view: bv, sort: "miles" })}">${fmtNum(bl.reduce((s, v) => s + v.miles_30, 0))}</a></td>
+            </tr>`);
+          });
+        });
+        html += `<h2 class="section-title">By base</h2>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>Region</th><th>Base</th><th class="num">Vehicles</th>
+              <th class="num">MOT overdue</th><th class="num">MOT due soon</th>
+              <th class="num">Service overdue</th><th class="num">Service due soon</th>
+              <th class="num">MOT compliant</th><th class="num">Miles (30 days)</th></tr></thead>
+            <tbody>${rows.join("")}</tbody></table></div>`;
+      }
+
+      // Base / region: the vans needing action, with buttons
+      if (view !== "all") {
+        const oneBase = view.startsWith("b:");
+        ["mot", "service"].forEach(check => {
+          const action = list.filter(v => S(v, check).status !== "OK")
+            .sort((a, b) => dueSort(a, b, check));
+          html += `<h2 class="section-title">${CHECK_NAME[check]} – needs action</h2>` +
+            (action.length ? vehicleTable(action, check, { actions: true, oneBase })
+                           : `<div class="empty">Nothing needs action – every ${CHECK_NAME[check].toLowerCase()} is in date and booked.</div>`);
+        });
+      }
+
+      main.innerHTML = html;
+      const sel = document.getElementById("viewSelect");
+      if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
+      wireTable();
+    }
 
     // Mileage section for a list of vehicles (any slice of the company)
     function mileageSection(list, view) {
       const baseIds = new Set(list.map(v => v.base_id));
       const miles30 = list.reduce((s, v) => s + v.miles_30, 0);
       const vanDays = list.reduce((s, v) => s + v.days_used_30, 0);
-      // Last 26 complete weeks
       const weeks = new Map();
       c.weekly.filter(w => baseIds.has(w.base_id)).forEach(w => weeks.set(w.week_start, (weeks.get(w.week_start) || 0) + w.miles));
-      const wk = [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0]));
       const thisMonday = NB.isoToday(-((new Date().getDay() + 6) % 7));
-      const full = wk.filter(([d]) => d < thisMonday).slice(-26);
+      const full = [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0])).filter(([d]) => d < thisMonday).slice(-26);
       const weekData = full.map(([d, mi]) => ({ label: shortDate(d), value: mi, tip: "Week of " + shortDate(d) + ": " + fmtNum(mi) + " miles" }));
-      // Busiest days: average miles per van that day
       const dow = DAYS.map((name, i) => {
         const rows = c.weekday.filter(r => baseIds.has(r.base_id) && r.dow === i + 1);
         const mi = rows.reduce((s, r) => s + r.miles, 0), vd = rows.reduce((s, r) => s + r.van_days, 0);
@@ -174,116 +312,11 @@
         </div>`;
     }
 
-    function numLink(n, href, tone) {
-      const cls = n === 0 ? "big-num big-num--zero" : "big-num" + (tone ? " big-num--" + tone : "");
-      return `<a class="${cls}" href="${href}" aria-label="${n} – show the list">${n}</a>`;
-    }
-
-    function setNav(which) {
-      document.querySelectorAll("[data-nav]").forEach(a => {
-        if (a.dataset.nav === which) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
-      });
-    }
-
-    function flashHtml() {
-      if (!flash) return "";
-      const html = `<div class="alert alert--ok" role="status">${flash}</div>`;
-      flash = "";
-      return html;
-    }
-
-    /* ---------------- HOME ---------------- */
-
-    function renderHome(q) {
-      setNav("home");
-      if (m.role.key === "driver") return renderDriverHome();
-
-      const view = allowedView(q.get("view"));
-      const list = c.vehicles.filter(v => inView(v, view));
-      const k = counts(list);
-      const L = (status) => link("list", { status, view });
-      const canChoose = m.scope.level !== "base";
-
-      let html = flashHtml();
-      html += `<div class="row row--between" style="align-items:end">
-          <div>
-            <p class="card__eyebrow">${esc(m.role.label)}</p>
-            <h1 style="margin:0">Vehicle checks – for ${fmtNum(k.total)} vehicles ${view === "all" ? "across" : "at"} ${esc(viewName(view))}</h1>
-          </div>
-          ${canChoose ? `<div class="field" style="min-width:220px">
-              <label for="viewSelect">Showing</label>
-              <select id="viewSelect">${viewOptions(view)}</select>
-            </div>` : ""}
-        </div>`;
-
-      // Headline tiles
-      const tiles = [
-        `<a class="tile tile--info" href="${L("all")}"><div class="tile__value">${fmtNum(k.total)}</div><div class="tile__label">Vehicles</div></a>`,
-        `<a class="tile ${k.overdue ? "tile--warn" : "tile--ok"}" href="${L("all")}"><div class="tile__value">${k.compliance.toFixed(1)}%</div><div class="tile__label">MOT compliant</div></a>`,
-        `<a class="tile ${k.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue")}"><div class="tile__value">${k.overdue}</div><div class="tile__label">Off road – MOT overdue</div></a>`,
-        `<a class="tile ${k.notBooked ? "tile--warn" : "tile--ok"}" href="${L("notbooked")}"><div class="tile__value">${k.notBooked}</div><div class="tile__label">Need booking</div></a>`
-      ];
-      html += `<div class="tiles" style="margin-top:var(--space-4)">${tiles.join("")}</div>`;
-
-      // The check grid (Doug's Power BI layout)
-      html += `<h2 class="section-title">Checks</h2>
-        <div class="table-wrap"><table class="check-grid">
-          <thead><tr><th scope="col" style="text-align:left">${fmtNum(k.total)} vehicles</th>
-            <th scope="col">Overdue</th><th scope="col" title="Due in the next ${c.rules.mot_warning_days.value} days">Due soon</th><th scope="col">Not booked</th></tr></thead>
-          <tbody>${CHECKS.map(ch => ch.live
-            ? `<tr><th scope="row">${ch.label}</th>
-                 <td>${numLink(k.overdue, L("overdue"), "danger")}</td>
-                 <td>${numLink(k.soon, L("due"), "warn")}</td>
-                 <td>${numLink(k.notBooked, L("notbooked"), "warn")}</td></tr>`
-            : `<tr class="soon"><th scope="row">${ch.label}</th>
-                 <td colspan="3"><span class="big-num big-num--na">Coming soon</span></td></tr>`).join("")}
-          </tbody></table></div>`;
-
-      html += mileageSection(list, view);
-
-      // Company / region: break down by base
-      if (view === "all" || view.startsWith("r:")) {
-        const regions = c.regions.filter(r => view === "all" || "r:" + r.id === view);
-        const rows = [];
-        regions.forEach(r => {
-          c.bases.filter(b => b.region_id === r.id).forEach(b => {
-            const bv = "b:" + b.id;
-            const bk = counts(list.filter(v => v.base_id === b.id));
-            rows.push(`<tr>
-              <td>${esc(r.name)}</td>
-              <td><a href="${link("", { view: bv })}">${esc(b.name)}</a></td>
-              <td class="num"><a href="${link("list", { status: "all", view: bv })}">${bk.total}</a></td>
-              <td class="num">${bk.overdue ? `<a class="text-danger" href="${link("list", { status: "overdue", view: bv })}">${bk.overdue}</a>` : "0"}</td>
-              <td class="num">${bk.soon ? `<a href="${link("list", { status: "due", view: bv })}">${bk.soon}</a>` : "0"}</td>
-              <td class="num">${bk.notBooked ? `<a href="${link("list", { status: "notbooked", view: bv })}">${bk.notBooked}</a>` : "0"}</td>
-              <td class="num">${bk.compliance.toFixed(1)}%</td>
-              <td class="num"><a href="${link("list", { status: "all", view: bv, sort: "miles" })}">${fmtNum(list.filter(v => v.base_id === b.id).reduce((s, v) => s + v.miles_30, 0))}</a></td>
-            </tr>`);
-          });
-        });
-        html += `<h2 class="section-title">By base</h2>
-          <div class="table-wrap"><table class="table">
-            <thead><tr><th>Region</th><th>Base</th><th class="num">Vehicles</th><th class="num">MOT overdue</th>
-              <th class="num">Due soon</th><th class="num">Not booked</th><th class="num">MOT compliant</th><th class="num">Miles (30 days)</th></tr></thead>
-            <tbody>${rows.join("")}</tbody></table></div>`;
-      }
-
-      // Base / region: the vans needing action, with buttons
-      if (view !== "all") {
-        const action = list.filter(v => v.status !== "OK").sort((a, b) => a.days_to_due - b.days_to_due);
-        html += `<h2 class="section-title">Needs action</h2>` + vehicleTable(action, true, view.startsWith("b:"));
-      }
-
-      main.innerHTML = html;
-      const sel = document.getElementById("viewSelect");
-      if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
-      wireTable();
-    }
-
     function renderDriverHome() {
       const base = c.baseById.get(m.person.base_id);
       const list = c.vehicles.filter(v => v.base_id === base.id);
       const off = list.filter(v => v.status === "Overdue");
+      const svcOver = list.filter(v => v.svc.status === "Overdue");
       main.innerHTML = flashHtml() + `
         <p class="card__eyebrow">${esc(m.role.label)} · ${esc(base.name)}</p>
         <h1>Hello, ${esc(m.person.name)}</h1>
@@ -305,42 +338,60 @@
               <p class="card__desc">Don't take these out until the MOT is done.</p>`
               : `<p class="card__desc">Every vehicle at ${esc(base.name)} has a valid MOT.</p>`}
           </article>
+          ${svcOver.length ? `<article class="card card--warn">
+            <div class="card__eyebrow">${esc(base.name)}</div>
+            <h2 class="card__title">Service overdue</h2>
+            <ul class="item-list">${svcOver.map(v =>
+              `<li><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a> – ${serviceDueText(v.svc)}${v.svc.booked ? `, booked ${fmtDate(v.svc.booking_date)}` : ""}</li>`).join("")}</ul>
+            <p class="card__desc">Tell the base manager if you're given one of these.</p>
+          </article>` : ""}
         </div>`;
     }
 
     /* ---------------- LIST (drill-down) ---------------- */
 
-    const STATUS_TITLES = {
-      overdue: "MOT overdue", due: "MOT due soon", notbooked: "MOT needs booking", ok: "MOT OK", all: "All vehicles"
-    };
+    const STATUS_WORDS = { overdue: "overdue", due: "due soon", notbooked: "needs booking", ok: "OK", all: "" };
+
+    function dueSort(a, b, check) {
+      if (check === "service") {
+        const sa = a.svc, sb = b.svc;
+        return (sa.effective_due_date || "").localeCompare(sb.effective_due_date || "") || a.registration.localeCompare(b.registration);
+      }
+      return a.days_to_due - b.days_to_due || a.registration.localeCompare(b.registration);
+    }
 
     function renderList(q) {
-      const status = STATUS_TITLES[q.get("status")] ? q.get("status") : "all";
+      const check = q.get("check") === "service" ? "service" : "mot";
+      const status = STATUS_WORDS[q.get("status")] != null ? q.get("status") : "all";
       const view = allowedView(q.get("view"));
-      setNav(status === "all" && view === defaultView() ? "list" : "");
+      setNav(status === "all" && view === defaultView() && !q.get("sort") ? "list" : "");
       let list = c.vehicles.filter(v => inView(v, view));
-      if (status === "overdue") list = list.filter(v => v.status === "Overdue");
-      if (status === "due") list = list.filter(v => v.status === "Due soon");
-      if (status === "notbooked") list = list.filter(v => v.status !== "OK" && !v.booked);
-      if (status === "ok") list = list.filter(v => v.status === "OK");
+      const st = v => S(v, check);
+      if (status === "overdue") list = list.filter(v => st(v).status === "Overdue");
+      if (status === "due") list = list.filter(v => st(v).status === "Due soon");
+      if (status === "notbooked") list = list.filter(v => st(v).status !== "OK" && !st(v).booked);
+      if (status === "ok") list = list.filter(v => st(v).status === "OK");
       const search = (q.get("find") || "").trim().toUpperCase();
       if (search) list = list.filter(v =>
         (v.registration + " " + v.fleet_number + " " + v.make + " " + v.model + " " + v.class_short).toUpperCase().includes(search));
-      const SORTS = { due: "MOT due date", miles: "Most miles (30 days)", fewest: "Fewest miles (30 days)", reg: "Registration" };
+      const SORTS = { due: "Due date", miles: "Most miles (30 days)", fewest: "Fewest miles (30 days)", reg: "Registration" };
       const sort = SORTS[q.get("sort")] ? q.get("sort") : "due";
       const byReg = (a, b) => a.registration.localeCompare(b.registration);
       list.sort(sort === "miles" ? (a, b) => b.miles_30 - a.miles_30 || byReg(a, b)
               : sort === "fewest" ? (a, b) => a.miles_30 - b.miles_30 || byReg(a, b)
               : sort === "reg" ? byReg
-              : (a, b) => a.days_to_due - b.days_to_due || byReg(a, b));
+              : (a, b) => dueSort(a, b, check));
 
+      const title = status === "all" ? "All vehicles" : `${CHECK_NAME[check]} ${STATUS_WORDS[status]}`;
       main.innerHTML = `
         <a class="back-link" href="${link("", { view })}">Back to ${esc(viewName(view))}</a>
-        <h1>${STATUS_TITLES[status]} – ${esc(viewName(view))} <span class="muted">(${list.length})</span></h1>
+        <h1>${title} – ${esc(viewName(view))} <span class="muted">(${list.length})</span></h1>
         <form id="filters" class="toolbar" style="margin-bottom:var(--space-4)">
           ${m.scope.level !== "base" ? `<div class="field"><label for="fView">Showing</label><select id="fView">${viewOptions(view)}</select></div>` : ""}
-          <div class="field"><label for="fStatus">MOT</label>
-            <select id="fStatus">${Object.entries(STATUS_TITLES).map(([k, l]) =>
+          <div class="field"><label for="fCheck">Check</label>
+            <select id="fCheck">${Object.entries(CHECK_NAME).map(([k, l]) => `<option value="${k}"${k === check ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+          <div class="field"><label for="fStatus">Status</label>
+            <select id="fStatus">${[["all", "Any"], ["overdue", "Overdue"], ["due", "Due soon"], ["notbooked", "Needs booking"], ["ok", "OK"]].map(([k, l]) =>
               `<option value="${k}"${k === status ? " selected" : ""}>${l}</option>`).join("")}</select></div>
           <div class="field"><label for="fSort">Sort by</label>
             <select id="fSort">${Object.entries(SORTS).map(([k, l]) =>
@@ -348,46 +399,52 @@
           <div class="field"><label for="fFind">Find</label>
             <input id="fFind" type="search" placeholder="Reg, make, type…" value="${esc(q.get("find") || "")}"></div>
         </form>
-        ${list.length ? vehicleTable(list, false, view.startsWith("b:")) : `<div class="empty">Nothing here – all good.</div>`}`;
+        ${list.length ? vehicleTable(list, check, { oneBase: view.startsWith("b:"), miles: true }) : `<div class="empty">Nothing here – all good.</div>`}`;
 
+      const $ = id => document.getElementById(id);
       const go = () => {
-        const fv = document.getElementById("fView");
-        const so = document.getElementById("fSort").value;
-        location.hash = link("list", { status: document.getElementById("fStatus").value,
-          view: fv ? fv.value : view, sort: so === "due" ? "" : so, find: document.getElementById("fFind").value.trim() });
+        const so = $("fSort").value, ch = $("fCheck").value;
+        location.hash = link("list", { status: $("fStatus").value, check: ch === "service" ? "service" : "",
+          view: $("fView") ? $("fView").value : view, sort: so === "due" ? "" : so, find: $("fFind").value.trim() });
       };
-      document.getElementById("fStatus").addEventListener("change", go);
-      document.getElementById("fSort").addEventListener("change", go);
-      const fv = document.getElementById("fView");
-      if (fv) fv.addEventListener("change", go);
+      ["fStatus", "fSort", "fCheck", "fView"].forEach(id => { if ($(id)) $(id).addEventListener("change", go); });
       let t;
-      const find = document.getElementById("fFind");
-      find.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { go(); }, 500); });
-      document.getElementById("filters").addEventListener("submit", e => { e.preventDefault(); go(); });
-      if (q.get("find") != null) { find.focus(); find.setSelectionRange(find.value.length, find.value.length); }
+      $("fFind").addEventListener("input", () => { clearTimeout(t); t = setTimeout(go, 500); });
+      $("filters").addEventListener("submit", e => { e.preventDefault(); go(); });
+      if (q.get("find") != null) { const f = $("fFind"); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
       wireTable();
     }
 
-    function vehicleTable(list, withActions, oneBase) {
-      if (!list.length) return `<div class="empty">Nothing needs action – every MOT is in date and booked.</div>`;
-      const canRecord = m.role.can_record;
+    function vehicleTable(list, check, opts) {
+      opts = opts || {};
+      const canRecord = m.role.can_record && opts.actions;
+      const isSvc = check === "service";
       return `<div class="table-wrap"><table class="table">
-        <thead><tr><th>Vehicle</th>${oneBase ? "" : "<th>Base</th>"}<th>Type</th><th>Make &amp; model</th><th>MOT due</th><th>Status</th><th>Booking</th><th class="num">Miles (30 days)</th>
-          ${withActions && canRecord ? "<th><span class='visually-hidden'>Actions</span></th>" : ""}</tr></thead>
-        <tbody>${list.map(v => `<tr data-href="${link("van/" + v.registration)}">
+        <thead><tr><th>Vehicle</th>${opts.oneBase ? "" : "<th>Base</th>"}<th>Type</th><th>Make &amp; model</th>
+          <th>${isSvc ? "Service due" : "MOT due"}</th><th>Status</th><th>Booking</th>
+          ${opts.miles ? '<th class="num">Miles (30 days)</th>' : ""}
+          ${canRecord ? "<th><span class='visually-hidden'>Actions</span></th>" : ""}</tr></thead>
+        <tbody>${list.map(v => {
+          const s = S(v, check);
+          const due = isSvc
+            ? `${fmtDate(s.effective_due_date)}<div class="small muted">${serviceDueText(s)}</div>`
+            : `${fmtDate(v.due_date)}<div class="small muted">${daysText(v.days_to_due)}${v.first_mot ? " · first MOT" : ""}</div>`;
+          const recordHref = link(isSvc ? "record-service" : "record", { reg: v.registration });
+          return `<tr data-href="${link("van/" + v.registration)}">
           <td><a class="reg row-link" href="${link("van/" + v.registration)}">${esc(v.registration)}</a></td>
-          ${oneBase ? "" : `<td>${esc(v.base_name)}</td>`}
+          ${opts.oneBase ? "" : `<td>${esc(v.base_name)}</td>`}
           <td>${esc(v.class_short)}</td>
           <td>${esc(v.make)} ${esc(v.model)}</td>
-          <td class="nums">${fmtDate(v.due_date)}<div class="small muted">${daysText(v.days_to_due)}${v.first_mot ? " · first MOT" : ""}</div></td>
-          <td>${statusBadge(v.status)}</td>
-          <td>${bookingBadge(v)}</td>
-          <td class="num">${fmtNum(v.miles_30)}${v.days_used_30 < 20 ? `<div class="small muted">used ${v.days_used_30} days</div>` : ""}</td>
-          ${withActions && canRecord ? `<td><div class="row" style="flex-wrap:nowrap">
-              ${!v.booked
-                ? `<button class="btn btn--secondary action-btn" type="button" data-book="${esc(v.registration)}">Book MOT</button>`
-                : `<a class="btn btn--ghost action-btn" href="${link("record", { reg: v.registration })}">Record MOT</a>`}</div></td>` : ""}
-        </tr>`).join("")}</tbody></table></div>`;
+          <td class="nums">${due}</td>
+          <td>${statusBadge(s.status)}</td>
+          <td>${bookingBadge(s)}</td>
+          ${opts.miles ? `<td class="num">${fmtNum(v.miles_30)}${v.days_used_30 < 20 ? `<div class="small muted">used ${v.days_used_30} days</div>` : ""}</td>` : ""}
+          ${canRecord ? `<td><div class="row" style="flex-wrap:nowrap">
+              ${!s.booked
+                ? `<button class="btn btn--secondary action-btn" type="button" data-book="${esc(v.registration)}" data-kind="${check}">Book ${isSvc ? "service" : "MOT"}</button>`
+                : `<a class="btn btn--ghost action-btn" href="${recordHref}">Record ${isSvc ? "service" : "MOT"}</a>`}</div></td>` : ""}
+        </tr>`;
+        }).join("")}</tbody></table></div>`;
     }
 
     function wireTable() {
@@ -395,7 +452,7 @@
         if (e.target.closest("a, button")) return;
         location.hash = tr.dataset.href;
       }));
-      main.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book)));
+      main.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book, b.dataset.kind || "mot")));
     }
 
     /* ---------------- VEHICLE "SPORTS CARD" ---------------- */
@@ -405,13 +462,14 @@
       const v = c.vehicleByReg.get(reg);
       if (!v) { main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="empty">Vehicle ${esc(reg)} not found.</div>`; return; }
       main.innerHTML = `<p class="status-line">Loading ${esc(reg)}…</p>`;
-      const [res, dres] = await Promise.all([
+      const [res, dres, sres] = await Promise.all([
         NB.db.from("mot_history").select("*").eq("vehicle_id", v.id).order("test_date", { ascending: false }).order("id", { ascending: false }),
-        NB.db.from("daily_mileage").select("day,miles,odometer").eq("vehicle_id", v.id).order("day")
+        NB.db.from("daily_mileage").select("day,miles,odometer").eq("vehicle_id", v.id).order("day"),
+        NB.db.from("service_history").select("*").eq("vehicle_id", v.id).order("service_date", { ascending: false }).order("id", { ascending: false })
       ]);
-      if (res.error) throw res.error;
-      if (dres.error) throw dres.error;
-      const hist = res.data;
+      [res, dres, sres].forEach(r => { if (r.error) throw r.error; });
+      const hist = res.data, svcHist = sres.data, s = v.svc;
+
       // Weekly miles for this van, last 52 complete weeks
       const wk = new Map();
       dres.data.forEach(d => {
@@ -423,6 +481,7 @@
       const vanWeeks = [...wk.entries()].filter(([k]) => k < thisMonday).sort().slice(-52)
         .map(([k, mi]) => ({ label: shortDate(k), value: mi, tip: "Week of " + shortDate(k) + ": " + fmtNum(mi) + " miles" }));
       const offDays = dres.data.filter(d => d.day >= NB.isoToday(-30) && d.miles === 0).length;
+
       const passes = hist.filter(h => h.result === "Pass" && h.mileage != null);
       let perYear = null;
       if (passes.length >= 2) {
@@ -433,14 +492,28 @@
       const lastPass = hist.find(h => h.result === "Pass");
       const lastAdvisories = lastPass && lastPass.advisories ? lastPass.advisories.split("|") : [];
       const fails = hist.filter(h => h.result === "Fail").length;
-      const tone = { Overdue: "danger", "Due soon": "warn", OK: "ok" }[v.status];
+      const TONE = { Overdue: "danger", "Due soon": "warn", OK: "ok" };
+      const tone = TONE[v.status], stone = TONE[s.status];
+      const worst = [v.status, s.status].includes("Overdue") ? "danger" : [v.status, s.status].includes("Due soon") ? "warn" : "ok";
       const canRecord = m.role.can_record;
       const age = Math.max(0, Math.floor((Date.now() - NB.parseDate(v.first_registered)) / (365.25 * 864e5)));
+      const yearAgo = NB.isoToday(-365);
+      const svcCost12 = svcHist.filter(h => h.service_date >= yearAgo).reduce((t, h) => t + Number(h.total_cost || 0), 0);
+
+      const actions = (kind, booked) => {
+        const rec = link(kind === "service" ? "record-service" : "record", { reg: v.registration });
+        const word = kind === "service" ? "service" : "MOT";
+        return !canRecord ? "" : `<div class="row">${booked
+          ? `<a class="btn btn--primary" href="${rec}">Record ${word}</a>
+             <button class="link-btn" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Change booking</button>`
+          : `<button class="btn btn--primary" type="button" data-book="${esc(v.registration)}" data-kind="${kind}">Book ${word}</button>
+             <a class="link-btn" href="${rec}">Record ${word}</a>`}</div>`;
+      };
 
       main.innerHTML = flashHtml() + `
         <a class="back-link" href="javascript:history.back()">Back</a>
         <div class="van-hero">
-          <article class="card card--${tone}">
+          <article class="card card--${worst}">
             <div class="card__eyebrow">${esc(v.class_name)}</div>
             <h1 class="van-hero__reg reg">${esc(v.registration)}</h1>
             <p style="margin:var(--space-1) 0 var(--space-3)">${esc(v.make)} ${esc(v.model)} · ${esc(v.fuel)}</p>
@@ -455,6 +528,9 @@
             <div class="tile tile--${tone}"><div class="tile__value">${esc(v.status)}</div>
               <div class="tile__label">MOT ${v.status === "Overdue" ? "expired" : "due"} ${fmtDate(v.due_date)}</div>
               <div class="tile__sub">${daysText(v.days_to_due)}</div></div>
+            <div class="tile tile--${stone}"><div class="tile__value">${esc(s.status)}</div>
+              <div class="tile__label">Service</div>
+              <div class="tile__sub">${serviceDueText(s)}</div></div>
             <div class="tile tile--info"><div class="tile__value">${fmtNum(v.odometer)}</div>
               <div class="tile__label">Odometer</div><div class="tile__sub">at end of yesterday</div></div>
             <div class="tile tile--info"><div class="tile__value">${fmtNum(v.miles_30)}</div>
@@ -463,9 +539,9 @@
               <div class="tile__label">Miles – last 12 months</div></div>
             <div class="tile ${lastAdvisories.length ? "tile--warn" : "tile--ok"}"><div class="tile__value">${lastAdvisories.length}</div>
               <div class="tile__label">Advisories at last MOT</div></div>
-            <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Service</div></div>
+            <div class="tile tile--info"><div class="tile__value">${money(svcCost12)}</div>
+              <div class="tile__label">Servicing – last 12 months</div><div class="tile__sub">demo figures</div></div>
             <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Tyres</div></div>
-            <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Running cost</div></div>
           </div>
         </div>
 
@@ -474,6 +550,20 @@
           <h3>Miles per week</h3><p class="card__desc">Last 52 weeks${perYear ? ` · about ${fmtNum(perYear)} miles a year from its MOTs` : ""}</p>
           ${vanWeeks.length ? NB.barChart(vanWeeks, { ariaLabel: "Miles per week for " + v.registration, labelEvery: 6, height: 220, width: 1100 }) : `<p class="muted">No mileage recorded yet.</p>`}
           ${vanWeeks.length ? NB.chartTable(vanWeeks.map(d => ["Week of " + d.label, fmtNum(d.value)]), ["Week", "Miles"]) : ""}
+        </article>
+
+        <h2 class="section-title">Service</h2>
+        <article class="card card--${stone}">
+          <div class="row row--between">
+            <div class="stack" style="gap:var(--space-1)">
+              <div>${statusBadge(s.status)} ${bookingBadge(s)}</div>
+              <div>Next service: <strong>${fmtNum(s.due_odometer)} miles</strong> or <strong>${fmtDate(s.due_date)}</strong>, whichever comes first</div>
+              <div class="small muted">${serviceDueText(s)} · at about ${fmtNum(Math.round(s.miles_per_day))} miles a day, the ${s.due_by === "miles" ? "miles" : "date"} will come first</div>
+              ${s.last_service_date ? `<div class="small muted">Last service: ${esc(s.last_service_type)} on ${fmtDate(s.last_service_date)} at ${fmtNum(s.last_service_odometer)} miles</div>` : ""}
+              ${s.booked ? `<div>Booked for <strong>${fmtDate(s.booking_date)}</strong> at ${esc(s.booking_provider || "–")}${s.booking_notes ? ` · ${esc(s.booking_notes)}` : ""}</div>` : ""}
+            </div>
+            ${actions("service", s.booked)}
+          </div>
         </article>
 
         <h2 class="section-title">MOT</h2>
@@ -485,16 +575,25 @@
               ${v.booked ? `<div>Booked for <strong>${fmtDate(v.booking_date)}</strong> at ${esc(v.booking_centre || "–")}${v.booking_notes ? ` · ${esc(v.booking_notes)}` : ""}</div>` : ""}
               ${fails ? `<div class="small muted">${fails} failed test${fails === 1 ? "" : "s"} in its history</div>` : ""}
             </div>
-            ${canRecord ? `<div class="row">
-                ${v.booked
-                  ? `<a class="btn btn--primary" href="${link("record", { reg: v.registration })}">Record MOT</a>
-                     <button class="link-btn" type="button" data-book="${esc(v.registration)}">Change booking</button>`
-                  : `<button class="btn btn--primary" type="button" data-book="${esc(v.registration)}">Book MOT</button>
-                     <a class="link-btn" href="${link("record", { reg: v.registration })}">Record MOT</a>`}</div>` : ""}
+            ${actions("mot", v.booked)}
           </div>
           ${lastAdvisories.length ? `<h3 style="margin-top:var(--space-4)">Advisories at last MOT</h3>
               <ul class="item-list">${lastAdvisories.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
         </article>
+
+        <h2 class="section-title">Service history</h2>
+        ${svcHist.length ? `<div class="table-wrap"><table class="table">
+          <thead><tr><th>Date</th><th>Type</th><th class="num">Odometer</th><th>Workshop</th><th>Defects fixed</th><th class="num">Cost</th><th>Recorded</th></tr></thead>
+          <tbody>${svcHist.map(h => `<tr>
+            <td class="nums">${fmtDate(h.service_date)}</td>
+            <td>${esc(h.service_type)}</td>
+            <td class="num">${fmtNum(h.odometer)}</td>
+            <td>${esc(h.provider_name || "–")}</td>
+            <td class="small">${h.defects_found ? h.defects_found.split("|").map(esc).join("; ") : '<span class="muted">None</span>'}</td>
+            <td class="num">${money(h.total_cost)}</td>
+            <td class="small muted">${esc(h.recorded_by || "")}<br>${NB.fmtDateTime(h.recorded_at)}</td>
+          </tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No services yet – the first is due ${fmtDate(s.due_date)} or at ${fmtNum(s.due_odometer)} miles.</div>`}
 
         <h2 class="section-title">MOT history</h2>
         ${hist.length ? `<div class="table-wrap"><table class="table">
@@ -515,16 +614,20 @@
 
     /* ---------------- RECORD AN MOT ---------------- */
 
-    function renderRecord(q) {
-      setNav("");
-      if (!m.role.can_record) {
-        main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="alert alert--warn"><strong>Not available</strong>A ${esc(m.role.label)} can view MOTs but not record them.</div>`;
-        return;
-      }
-      const reg = (q.get("reg") || "").toUpperCase();
-      const v = c.vehicleByReg.get(reg);
+    function notAllowed(what) {
+      main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="alert alert--warn"><strong>Not available</strong>A ${esc(m.role.label)} can view ${what} but not record them.</div>`;
+    }
+    function vehicleOptions(reg) {
       const regs = c.vehicles.filter(x => m.scope.level === "company" ||
         (m.scope.level === "region" ? x.region_id === m.scope.regionId : x.base_id === m.scope.baseId));
+      return `<option value="">Choose…</option>` + regs.map(x =>
+        `<option value="${esc(x.registration)}"${x.registration === reg ? " selected" : ""}>${esc(x.registration)} – ${esc(x.make)} ${esc(x.model)} (${esc(x.base_name)})</option>`).join("");
+    }
+
+    function renderRecord(q) {
+      setNav("");
+      if (!m.role.can_record) return notAllowed("MOTs");
+      const reg = (q.get("reg") || "").toUpperCase();
       main.innerHTML = `
         <a class="back-link" href="javascript:history.back()">Back</a>
         <h1>Record an MOT</h1>
@@ -532,10 +635,7 @@
           <div class="field-row">
             <div class="field">
               <label for="fReg">Vehicle</label>
-              <select id="fReg" required>
-                <option value="">Choose…</option>
-                ${regs.map(x => `<option value="${esc(x.registration)}"${x.registration === reg ? " selected" : ""}>${esc(x.registration)} – ${esc(x.make)} ${esc(x.model)} (${esc(x.base_name)})</option>`).join("")}
-              </select>
+              <select id="fReg" required>${vehicleOptions(reg)}</select>
               <div id="fRegHint" class="field__hint"></div>
             </div>
             <div class="field">
@@ -584,8 +684,7 @@
 
       const $ = id => document.getElementById(id);
       let result = "Pass";
-
-      function vehicle() { return c.vehicleByReg.get($("fReg").value); }
+      const vehicle = () => c.vehicleByReg.get($("fReg").value);
 
       async function updateExpiry() {
         const ve = vehicle();
@@ -596,8 +695,8 @@
       function updateVehicle() {
         const ve = vehicle();
         $("fRegHint").textContent = ve ? `MOT ${ve.status === "Overdue" ? "expired" : "due"} ${fmtDate(ve.due_date)} (${daysText(ve.days_to_due)})` : "";
-        $("fMileageHint").textContent = ve && ve.last_mot_mileage ? `At the last MOT: ${fmtNum(ve.last_mot_mileage)}` : "";
-        if (ve && ve.last_mot_mileage) $("fMileage").min = ve.last_mot_mileage;
+        $("fMileageHint").textContent = ve && ve.odometer ? `Odometer at end of yesterday: ${fmtNum(ve.odometer)}` : "";
+        if (ve && ve.odometer && !$("fMileage").value) $("fMileage").value = ve.odometer + 12;
         if (ve && ve.booking_centre) {
           const cen = c.centres.find(x => x.name === ve.booking_centre);
           if (cen) $("fCentre").value = cen.id;
@@ -611,7 +710,7 @@
         $("failField").hidden = result !== "Fail";
         updateExpiry();
       }));
-      $("fReg").addEventListener("change", updateVehicle);
+      $("fReg").addEventListener("change", () => { $("fMileage").value = ""; updateVehicle(); });
       $("fDate").addEventListener("change", updateExpiry);
       updateVehicle();
 
@@ -625,7 +724,7 @@
         if (!$("fDate").value) { err.textContent = "Enter the test date."; return; }
         if (!(mileage >= 0)) { err.textContent = "Enter the mileage from the certificate."; $("fMileage").focus(); return; }
         if (result === "Fail" && !$("fFails").value.trim()) { err.textContent = "Add at least one reason for failure."; $("fFails").focus(); return; }
-        const btn = e.submitter || $("motForm").querySelector("[type=submit]");
+        const btn = $("motForm").querySelector("[type=submit]");
         btn.disabled = true;
         const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean).join("|");
         const r = await NB.db.rpc("record_mot", {
@@ -645,34 +744,160 @@
       });
     }
 
-    /* ---------------- BOOK (dialog) ---------------- */
+    /* ---------------- RECORD A SERVICE ---------------- */
+
+    function renderRecordService(q) {
+      setNav("");
+      if (!m.role.can_record) return notAllowed("services");
+      const reg = (q.get("reg") || "").toUpperCase();
+      main.innerHTML = `
+        <a class="back-link" href="javascript:history.back()">Back</a>
+        <h1>Record a service</h1>
+        <form id="svcForm" class="form-panel" style="max-width:var(--width-narrow)" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="sReg">Vehicle</label>
+              <select id="sReg" required>${vehicleOptions(reg)}</select>
+              <div id="sRegHint" class="field__hint"></div>
+            </div>
+            <div class="field">
+              <label for="sDate">Service date</label>
+              <input id="sDate" type="date" required value="${NB.isoToday()}" max="${NB.isoToday()}" min="${NB.isoToday(-90)}">
+            </div>
+          </div>
+          <fieldset class="field" style="border:0;padding:0;margin:0">
+            <legend class="label">Type</legend>
+            <div class="segmented" role="group" aria-label="Service type">
+              <button type="button" data-type="Interim" aria-pressed="true">Interim</button>
+              <button type="button" data-type="Full" aria-pressed="false">Full</button>
+            </div>
+          </fieldset>
+          <div class="field-row">
+            <div class="field">
+              <label for="sOdo">Odometer</label>
+              <input id="sOdo" type="number" inputmode="numeric" min="0" step="1" required>
+              <div id="sOdoHint" class="field__hint"></div>
+            </div>
+            <div class="field">
+              <label for="sProvider">Workshop</label>
+              <select id="sProvider">${c.providers.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="sDefects">Defects found and fixed <span class="muted">(one per line, optional)</span></label>
+            <textarea id="sDefects" placeholder="e.g. Front brake pads replaced"></textarea>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="sLabour">Labour (£)</label>
+              <input id="sLabour" type="number" inputmode="decimal" min="0" step="0.01">
+            </div>
+            <div class="field">
+              <label for="sParts">Parts (£)</label>
+              <input id="sParts" type="number" inputmode="decimal" min="0" step="0.01">
+            </div>
+          </div>
+          <p class="small muted">Will be recorded by <strong>${esc(m.person.name)}</strong>, with today's date and time.
+            The next service is then worked out from these miles and this date.</p>
+          <p id="sError" class="field__error" role="alert"></p>
+          <div class="row">
+            <button class="btn btn--go" type="submit">Save service</button>
+            <a class="btn btn--ghost" href="javascript:history.back()">Cancel</a>
+          </div>
+        </form>`;
+
+      const $ = id => document.getElementById(id);
+      let type = "Interim";
+      const vehicle = () => c.vehicleByReg.get($("sReg").value);
+      function updateVehicle() {
+        const ve = vehicle();
+        if (!ve) { $("sRegHint").textContent = ""; $("sOdoHint").textContent = ""; return; }
+        $("sRegHint").textContent = `Service ${ve.svc.status === "OK" ? "OK" : ve.svc.status.toLowerCase()}: ${serviceDueText(ve.svc)}`;
+        $("sOdoHint").textContent = ve.odometer ? `Odometer at end of yesterday: ${fmtNum(ve.odometer)}` : "";
+        if (ve.odometer && !$("sOdo").value) $("sOdo").value = ve.odometer + 8;
+        const prov = c.providers.find(x => x.name === ve.svc.booking_provider);
+        if (prov) $("sProvider").value = prov.id;
+        // Suggest the type: alternate with the last one
+        const next = ve.svc.last_service_type === "Interim" ? "Full" : "Interim";
+        main.querySelector(`[data-type="${next}"]`).click();
+      }
+      main.querySelectorAll("[data-type]").forEach(b => b.addEventListener("click", () => {
+        type = b.dataset.type;
+        main.querySelectorAll("[data-type]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+        if (!$("sLabour").dataset.touched) $("sLabour").value = type === "Full" ? 295 : 185;
+        if (!$("sParts").dataset.touched) $("sParts").value = type === "Full" ? 165 : 85;
+      }));
+      ["sLabour", "sParts"].forEach(id => $(id).addEventListener("input", () => { $(id).dataset.touched = "1"; }));
+      $("sReg").addEventListener("change", () => { $("sOdo").value = ""; updateVehicle(); });
+      updateVehicle();
+      if (!vehicle()) main.querySelector('[data-type="Interim"]').click();
+
+      $("svcForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const err = $("sError");
+        err.textContent = "";
+        const ve = vehicle();
+        const odo = parseInt($("sOdo").value, 10);
+        if (!ve) { err.textContent = "Choose the vehicle."; $("sReg").focus(); return; }
+        if (!(odo >= 0)) { err.textContent = "Enter the odometer reading."; $("sOdo").focus(); return; }
+        const btn = $("svcForm").querySelector("[type=submit]");
+        btn.disabled = true;
+        const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean).join("|");
+        const r = await NB.db.rpc("record_service", {
+          p_registration: ve.registration, p_service_date: $("sDate").value, p_odometer: odo,
+          p_service_type: type, p_provider_id: +$("sProvider").value,
+          p_work_done: type === "Full" ? "Oil and filter change|Air and fuel filters|Brake fluid check|Full safety inspection" : "Oil and filter change|Safety inspection",
+          p_defects: lines($("sDefects").value),
+          p_labour_cost: parseFloat($("sLabour").value) || 0, p_parts_cost: parseFloat($("sParts").value) || 0,
+          p_person: m.person.code
+        });
+        btn.disabled = false;
+        if (r.error) { err.textContent = NB.friendlyError(r.error); return; }
+        await reload();
+        const ns = c.vehicleByReg.get(ve.registration).svc;
+        flash = `<strong>Service saved</strong>${esc(ve.registration)} – next due at ${fmtNum(ns.due_odometer)} miles or ${fmtDate(ns.due_date)}. Every dashboard has updated.`;
+        location.replace(link("van/" + ve.registration));
+      });
+    }
+
+    /* ---------------- BOOK (dialog, MOT or service) ---------------- */
 
     const dlg = document.getElementById("bookDialog");
-    let bookReg = null;
-    function openBook(reg) {
+    let bookReg = null, bookKind = "mot";
+    function openBook(reg, kind) {
       const v = c.vehicleByReg.get(reg);
-      bookReg = reg;
-      document.getElementById("bookTitle").textContent = "Book MOT – " + reg;
+      bookReg = reg; bookKind = kind;
+      const isSvc = kind === "service";
+      const s = isSvc ? v.svc : v;
+      document.getElementById("bookTitle").textContent = (isSvc ? "Book service – " : "Book MOT – ") + reg;
+      document.getElementById("bookCentreLabel").textContent = isSvc ? "Workshop" : "Test centre";
       const d = document.getElementById("bookDate");
       d.min = NB.isoToday(); d.max = NB.isoToday(120);
-      d.value = v.booking_date || NB.isoToday(v.days_to_due > 3 ? Math.min(v.days_to_due - 2, 14) : 1);
-      document.getElementById("bookCentre").innerHTML = c.centres.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
-      document.getElementById("bookNotes").value = v.status === "Overdue" ? "Off road until MOT" : "";
+      const daysLeft = isSvc
+        ? Math.round((NB.parseDate(s.effective_due_date) - NB.parseDate(NB.isoToday())) / 864e5)
+        : v.days_to_due;
+      d.value = s.booking_date || NB.isoToday(daysLeft > 3 ? Math.min(daysLeft - 2, 14) : 1);
+      const opts = isSvc ? c.providers : c.centres;
+      document.getElementById("bookCentre").innerHTML = opts.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+      document.getElementById("bookNotes").value = s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "Off road until MOT") : "";
       document.getElementById("bookError").textContent = "";
       dlg.showModal();
     }
     dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
     document.getElementById("bookForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const r = await NB.db.rpc("book_mot", {
+      const isSvc = bookKind === "service";
+      const args = {
         p_registration: bookReg, p_date: document.getElementById("bookDate").value,
-        p_centre_id: +document.getElementById("bookCentre").value,
         p_notes: document.getElementById("bookNotes").value, p_person: m.person.code
-      });
+      };
+      if (isSvc) args.p_provider_id = +document.getElementById("bookCentre").value;
+      else args.p_centre_id = +document.getElementById("bookCentre").value;
+      const r = await NB.db.rpc(isSvc ? "book_service" : "book_mot", args);
       if (r.error) { document.getElementById("bookError").textContent = NB.friendlyError(r.error); return; }
       dlg.close();
       await reload();
-      flash = `<strong>Booked</strong>${esc(bookReg)} – MOT on ${fmtDate(document.getElementById("bookDate").value)}.`;
+      flash = `<strong>Booked</strong>${esc(bookReg)} – ${isSvc ? "service" : "MOT"} on ${fmtDate(args.p_date)}.`;
       render();
     });
 
@@ -686,6 +911,7 @@
         if (parts[0] === "list") renderList(q);
         else if (parts[0] === "van" && parts[1]) await renderVan(parts[1].toUpperCase());
         else if (parts[0] === "record") renderRecord(q);
+        else if (parts[0] === "record-service") renderRecordService(q);
         else renderHome(q);
         window.scrollTo(0, 0);
       } catch (err) {

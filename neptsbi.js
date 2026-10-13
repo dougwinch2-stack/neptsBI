@@ -173,7 +173,9 @@
       db.from("vehicle_mot").select("*").order("registration"),
       db.from("vehicle_mileage").select("*"),
       db.from("mileage_weekly").select("*").order("week_start"),
-      db.from("mileage_weekday").select("*")
+      db.from("mileage_weekday").select("*"),
+      db.from("vehicle_service").select("*"),
+      db.from("service_providers").select("*").eq("active", true).order("name")
     ]);
     for (var i = 0; i < results.length; i++) if (results[i].error) throw results[i].error;
 
@@ -191,6 +193,10 @@
       v.miles_7 = r.miles_7 || 0; v.miles_30 = r.miles_30 || 0; v.miles_365 = r.miles_365 || 0;
       v.days_used_30 = r.days_used_30 || 0;
     });
+    // Service position joins onto each vehicle as v.svc
+    var svc = new Map(results[10].data.map(function (r) { return [r.vehicle_id, r]; }));
+    c.vehicles.forEach(function (v) { v.svc = svc.get(v.id) || { status: "OK", booked: false }; });
+    c.providers = results[11].data;
     c.weekly = results[8].data;
     c.weekday = results[9].data;
     c.regionById = new Map(c.regions.map(function (r) { return [r.id, r]; }));
