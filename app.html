@@ -256,7 +256,7 @@
             <div class="card__eyebrow">${esc(base.name)}</div>
             <h2 class="card__title">Off the road today</h2>
             ${off.length ? `<ul class="item-list">${off.map(v =>
-              `<li><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a> – MOT ran out ${fmtDate(v.due_date)}</li>`).join("")}</ul>
+              `<li><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a> – MOT expired ${fmtDate(v.due_date)}</li>`).join("")}</ul>
               <p class="card__desc">Don't take these out until the MOT is done.</p>`
               : `<p class="card__desc">Every vehicle at ${esc(base.name)} has a valid MOT.</p>`}
           </article>
@@ -327,8 +327,9 @@
           <td>${statusBadge(v.status)}</td>
           <td>${bookingBadge(v)}</td>
           ${withActions && canRecord ? `<td><div class="row" style="flex-wrap:nowrap">
-              ${!v.booked ? `<button class="btn btn--secondary" type="button" data-book="${esc(v.registration)}">Book</button>` : ""}
-              <a class="btn btn--ghost" href="${link("record", { reg: v.registration })}">Record MOT</a></div></td>` : ""}
+              ${!v.booked
+                ? `<button class="btn btn--secondary action-btn" type="button" data-book="${esc(v.registration)}">Book MOT</button>`
+                : `<a class="btn btn--ghost action-btn" href="${link("record", { reg: v.registration })}">Record MOT</a>`}</div></td>` : ""}
         </tr>`).join("")}</tbody></table></div>`;
     }
 
@@ -380,7 +381,7 @@
           </article>
           <div class="tiles">
             <div class="tile tile--${tone}"><div class="tile__value">${esc(v.status)}</div>
-              <div class="tile__label">MOT · ${v.status === "Overdue" ? "ran out" : "due"} ${fmtDate(v.due_date)}</div>
+              <div class="tile__label">MOT ${v.status === "Overdue" ? "expired" : "due"} ${fmtDate(v.due_date)}</div>
               <div class="tile__sub">${daysText(v.days_to_due)}</div></div>
             <div class="tile tile--info"><div class="tile__value">${fmtNum(v.last_mot_mileage)}</div>
               <div class="tile__label">Miles at last MOT</div></div>
@@ -399,13 +400,16 @@
           <div class="row row--between">
             <div class="stack" style="gap:var(--space-1)">
               <div>${statusBadge(v.status)} ${bookingBadge(v)}</div>
-              <div>${v.status === "Overdue" ? "Ran out" : "Due"} <strong>${fmtDate(v.due_date)}</strong> – ${daysText(v.days_to_due)}${v.first_mot ? " (first MOT)" : ""}</div>
+              <div>MOT ${v.status === "Overdue" ? "expired" : "due"} <strong>${fmtDate(v.due_date)}</strong> – ${daysText(v.days_to_due)}${v.first_mot ? " (first MOT)" : ""}</div>
               ${v.booked ? `<div>Booked for <strong>${fmtDate(v.booking_date)}</strong> at ${esc(v.booking_centre || "–")}${v.booking_notes ? ` · ${esc(v.booking_notes)}` : ""}</div>` : ""}
               ${fails ? `<div class="small muted">${fails} failed test${fails === 1 ? "" : "s"} in its history</div>` : ""}
             </div>
             ${canRecord ? `<div class="row">
-                <button class="btn btn--secondary" type="button" data-book="${esc(v.registration)}">${v.booked ? "Change booking" : "Book MOT"}</button>
-                <a class="btn btn--primary" href="${link("record", { reg: v.registration })}">Record MOT</a></div>` : ""}
+                ${v.booked
+                  ? `<a class="btn btn--primary" href="${link("record", { reg: v.registration })}">Record MOT</a>
+                     <button class="link-btn" type="button" data-book="${esc(v.registration)}">Change booking</button>`
+                  : `<button class="btn btn--primary" type="button" data-book="${esc(v.registration)}">Book MOT</button>
+                     <a class="link-btn" href="${link("record", { reg: v.registration })}">Record MOT</a>`}</div>` : ""}
           </div>
           ${lastAdvisories.length ? `<h3 style="margin-top:var(--space-4)">Advisories at last MOT</h3>
               <ul class="item-list">${lastAdvisories.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
@@ -510,7 +514,7 @@
       }
       function updateVehicle() {
         const ve = vehicle();
-        $("fRegHint").textContent = ve ? `MOT ${ve.status === "Overdue" ? "ran out" : "due"} ${fmtDate(ve.due_date)} (${daysText(ve.days_to_due)})` : "";
+        $("fRegHint").textContent = ve ? `MOT ${ve.status === "Overdue" ? "expired" : "due"} ${fmtDate(ve.due_date)} (${daysText(ve.days_to_due)})` : "";
         $("fMileageHint").textContent = ve && ve.last_mot_mileage ? `At the last MOT: ${fmtNum(ve.last_mot_mileage)}` : "";
         if (ve && ve.last_mot_mileage) $("fMileage").min = ve.last_mot_mileage;
         if (ve && ve.booking_centre) {
