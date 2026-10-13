@@ -542,3 +542,8 @@ a.kpi:hover { border-color: var(--border-strong); }
 .grid--fit { grid-template-columns: repeat(auto-fit, minmax(min(var(--min), 100%), 1fr)); }
 .table a { text-decoration: none; font-weight: 500; }
 .table a:hover { text-decoration: underline; }
+
+/* Touch screens: no "hover" shading left behind on a tapped row */
+@media (hover: none) {
+  .work tbody tr:hover td, .table tbody tr:hover td { background: transparent; }
+}
