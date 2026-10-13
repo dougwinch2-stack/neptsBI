@@ -80,7 +80,8 @@
     return '<span class="badge badge--' + (STATUS_CLASS[status] || "neutral") + '">' + esc(status) + "</span>";
   }
   function bookingBadge(row) {
-    if (row.status === "OK") return "";
+    if (row.status === "OK" && !row.booked && !row.retest) return "";
+    if (row.awaiting_result) return '<span class="badge badge--warn">Result to log</span>';
     return row.booked
       ? '<span class="badge badge--info">Booked ' + esc(fmtDate(row.booking_date)) + "</span>"
       : '<span class="badge badge--neutral">Not booked</span>';

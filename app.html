@@ -6,18 +6,19 @@
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
   <!-- ?v= makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=3">
-  <link rel="stylesheet" href="neptsbi.css?v=3">
-  <script src="dougs.js?v=3"></script>
+  <link rel="stylesheet" href="dougs.css?v=6">
+  <link rel="stylesheet" href="neptsbi.css?v=6">
+  <script src="dougs.js?v=6"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=3"></script>
+  <script src="neptsbi.js?v=6"></script>
 </head>
 <body>
   <header class="app-header">
     <div class="app-header__inner">
       <a class="app-header__title logo" href="#/">nepts<span class="logo__bi">BI</span></a>
       <nav class="app-header__nav" aria-label="Main">
-        <a href="#/" data-nav="home">Home</a>
+        <a href="#/" data-nav="home">Dashboard</a>
+        <a href="#/work" data-nav="work" hidden>Work</a>
         <a href="#/list?status=all" data-nav="list">Vehicles</a>
       </nav>
       <p class="who" id="who" hidden></p>
@@ -31,6 +32,11 @@
   <dialog id="bookDialog" class="dialog" aria-labelledby="bookTitle">
     <form id="bookForm" class="stack" method="dialog">
       <h2 id="bookTitle">Book</h2>
+      <div class="field" id="bookVehField" hidden>
+        <label for="bookVeh">Vehicle</label>
+        <select id="bookVeh"></select>
+        <div class="field__hint">Vans that need booking are listed first.</div>
+      </div>
       <div class="field">
         <label for="bookDate">Appointment date</label>
         <input id="bookDate" type="date" required>
@@ -200,6 +206,16 @@
             </div>` : ""}
         </div>`;
 
+      // Quick actions: the obvious place to book or record something
+      const wm = workBuckets(list, "mot"), wsv = workBuckets(list, "service");
+      const wlabel = b => [b.result.length ? `${b.result.length} result${b.result.length === 1 ? "" : "s"} to log` : "", b.book.length ? `${b.book.length} to book` : ""].filter(Boolean).join(" · ") || "all done";
+      html += m.role.can_record
+        ? `<div class="quick-actions" role="group" aria-label="Work to do">
+            <a class="btn btn--primary" href="${link("work", { view: view === defaultView() ? "" : view })}">MOTs – ${wlabel(wm)}</a>
+            <a class="btn btn--primary" href="${link("work", { check: "service", view: view === defaultView() ? "" : view })}">Services – ${wlabel(wsv)}</a>
+          </div>`
+        : `<p class="small muted" style="margin:var(--space-3) 0 0">View only – MOTs and services are booked by base managers and the fleet administrator.</p>`;
+
       // Headline tiles
       html += `<div class="tiles" style="margin-top:var(--space-4)">
         <a class="tile tile--info" href="${L("all")}"><div class="tile__value">${fmtNum(k.total)}</div><div class="tile__label">Vehicles</div></a>
@@ -220,7 +236,9 @@
             return `<tr><th scope="row">${ch.label}</th>
                  <td>${numLink(kc.overdue, L("overdue", ch.key), "danger")}</td>
                  <td>${numLink(kc.soon, L("due", ch.key), "warn")}</td>
-                 <td>${numLink(kc.notBooked, L("notbooked", ch.key), "warn")}</td></tr>`;
+                 <td>${numLink(kc.notBooked, m.role.can_record
+                   ? link("work", { check: ch.key === "service" ? "service" : "", tab: "book", view: view === defaultView() ? "" : view })
+                   : L("notbooked", ch.key), "warn")}</td></tr>`;
           }).join("")}
           </tbody></table></div>`;
 
@@ -399,7 +417,7 @@
           <div class="field"><label for="fFind">Find</label>
             <input id="fFind" type="search" placeholder="Reg, make, type…" value="${esc(q.get("find") || "")}"></div>
         </form>
-        ${list.length ? vehicleTable(list, check, { oneBase: view.startsWith("b:"), miles: true }) : `<div class="empty">Nothing here – all good.</div>`}`;
+        ${list.length ? vehicleTable(list, check, { oneBase: view.startsWith("b:"), miles: true, actions: true }) : `<div class="empty">Nothing here – all good.</div>`}`;
 
       const $ = id => document.getElementById(id);
       const go = () => {
@@ -453,6 +471,377 @@
         location.hash = tr.dataset.href;
       }));
       main.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book, b.dataset.kind || "mot")));
+    }
+
+    /* ---------------- WORK (book → test → log the result) ---------------- */
+
+    const normReg = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const today = () => NB.isoToday();
+
+    function workBuckets(list, check) {
+      const st = v => S(v, check);
+      const needsBooking = v => !st(v).booked && (st(v).status !== "OK" || (check === "mot" && v.retest));
+      return {
+        book: list.filter(needsBooking).sort((a, b) => dueSort(a, b, check)),
+        booked: list.filter(v => st(v).booked && !st(v).awaiting_result)
+                    .sort((a, b) => st(a).booking_date.localeCompare(st(b).booking_date)),
+        result: list.filter(v => st(v).awaiting_result)
+                    .sort((a, b) => st(a).booking_date.localeCompare(st(b).booking_date))
+      };
+    }
+
+    function renderWork(q) {
+      setNav("work");
+      if (!m.role.can_record) return notAllowed("bookings");
+      const check = q.get("check") === "service" ? "service" : "mot";
+      const view = allowedView(q.get("view"));
+      const list = c.vehicles.filter(v => inView(v, view));
+      const bk = workBuckets(list, check);
+      let tab = ["book", "booked", "result"].includes(q.get("tab")) ? q.get("tab") : (bk.result.length ? "result" : "book");
+      const word = check === "service" ? "service" : "MOT";
+      const TABS = [["result", "Results to log"], ["book", "To book"], ["booked", "Booked"]];
+      const W = (params) => link("work", Object.assign({ check: check === "service" ? "service" : "", view: view === defaultView() ? "" : view, tab }, params));
+
+      main.innerHTML = flashHtml() + `
+        <div class="row row--between" style="align-items:end">
+          <div>
+            <p class="card__eyebrow">Work · ${esc(viewName(view))}</p>
+            <h1 style="margin:0">${check === "service" ? "Services" : "MOTs"}</h1>
+          </div>
+          <div class="row" style="align-items:end">
+            ${m.scope.level !== "base" ? `<div class="field" style="min-width:200px"><label for="wView">Showing</label><select id="wView">${viewOptions(view)}</select></div>` : ""}
+            <div class="segmented" role="group" aria-label="MOT or service" style="min-width:220px">
+              <button type="button" data-goto="${link("work", { view: view === defaultView() ? "" : view })}" aria-pressed="${check === "mot"}">MOT</button>
+              <button type="button" data-goto="${link("work", { check: "service", view: view === defaultView() ? "" : view })}" aria-pressed="${check === "service"}">Service</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="work-find">
+          <div class="field">
+            <label for="wFind">Find a vehicle <span class="muted">– type any part of the registration</span></label>
+            <input id="wFind" type="search" autocomplete="off" placeholder="e.g. 142" value="${esc(q.get("find") || "")}">
+          </div>
+        </div>
+        <div id="wFound"></div>
+
+        <div class="segmented work-tabs" role="tablist" aria-label="Stage">
+          ${TABS.map(([k, l]) => `<button type="button" role="tab" aria-selected="${k === tab}" aria-pressed="${k === tab}" data-goto="${W({ tab: k })}">${l} <span class="work-count">${bk[k].length}</span></button>`).join("")}
+        </div>
+        <p class="small muted" style="margin:var(--space-2) 0 var(--space-3)">${
+          tab === "book" ? `Overdue, due in the next ${c.rules[check === "service" ? "service_warning_days" : "mot_warning_days"].value} days${check === "mot" ? ", or failed and needing a retest" : ""} – and not booked yet.`
+          : tab === "booked" ? `Booked and waiting for the day. Log the result early if you already have it.`
+          : `The appointment has been and gone – log the result from the ${check === "service" ? "workshop" : "certificate"}.`}</p>
+        <div id="wList">${bk[tab].length ? workTable(bk[tab], check, tab) : `<div class="empty">${
+          tab === "result" ? "No results waiting – all logged." : tab === "book" ? `Nothing to book – every ${word} is in date or booked.` : "Nothing booked at the moment."}</div>`}</div>`;
+
+      main.querySelectorAll("[data-goto]").forEach(b => b.addEventListener("click", () => { location.hash = b.dataset.goto; }));
+      const wv = document.getElementById("wView");
+      if (wv) wv.addEventListener("change", () => { location.hash = link("work", { check: check === "service" ? "service" : "", view: wv.value }); });
+
+      // Find any vehicle (booked through the app or not)
+      const find = document.getElementById("wFind"), found = document.getElementById("wFound");
+      const showFound = () => {
+        const t = normReg(find.value);
+        if (t.length < 2) { found.innerHTML = ""; return; }
+        const hits = list.filter(v => normReg(v.registration).includes(t) || normReg(v.fleet_number).includes(t)).slice(0, 8);
+        found.innerHTML = hits.length
+          ? `<h2 class="section-title">Found ${hits.length === 8 ? "(first 8)" : ""}</h2>` + workTable(hits, check, "find")
+          : `<p class="status-line">No vehicle matching “${esc(find.value)}” at ${esc(viewName(view))}.</p>`;
+        wireWork(found, check, view);
+      };
+      find.addEventListener("input", showFound);
+      showFound();
+      wireWork(document.getElementById("wList"), check, view);
+    }
+
+    function workTable(rows, check, mode) {
+      const isSvc = check === "service";
+      return `<div class="table-wrap"><table class="table work-table">
+        <thead><tr><th>Vehicle</th><th>${isSvc ? "Service due" : "MOT due"}</th><th>Booking</th><th>${mode === "book" ? "Book it" : '<span class="visually-hidden">Action</span>'}</th></tr></thead>
+        <tbody>${rows.map(v => workRow(v, check, mode)).join("")}</tbody></table></div>`;
+    }
+
+    function workRow(v, check, mode) {
+      const isSvc = check === "service";
+      const s = S(v, check);
+      const due = isSvc
+        ? `${statusBadge(s.status)} <span class="nums">${fmtDate(s.effective_due_date)}</span><div class="small muted">${serviceDueText(s)}</div>`
+        : `${statusBadge(v.status)}${v.retest ? ' <span class="badge badge--danger">Retest</span>' : ""} <span class="nums">${fmtDate(v.due_date)}</span><div class="small muted">${daysText(v.days_to_due)}${v.retest ? ` · failed ${fmtDate(v.last_test_date)}` : ""}</div>`;
+      const booking = s.booked
+        ? `<span class="nums">${fmtDate(s.booking_date)}</span>${s.awaiting_result ? ' <span class="badge badge--warn">Result to log</span>' : thisWeek(s.booking_date) ? ' <span class="badge badge--info">This week</span>' : ""}
+           <div class="small muted">${esc((isSvc ? s.booking_provider : s.booking_centre) || "")}</div>`
+        : '<span class="muted">Not booked</span>';
+      let action;
+      if (mode === "book") action = bookInline(v, check);
+      else if (mode === "booked") action = `<div class="row"><button class="btn btn--ghost action-btn" type="button" data-log="${esc(v.registration)}">Log result</button>
+          <button class="link-btn" type="button" data-rebook="${esc(v.registration)}">Change date</button></div>`;
+      else if (mode === "result") action = `<button class="btn btn--primary action-btn" type="button" data-log="${esc(v.registration)}">Log result</button>`;
+      else action = `<div class="row">${!s.booked ? `<button class="btn btn--secondary action-btn" type="button" data-rebook="${esc(v.registration)}">Book</button>` : ""}
+          <button class="btn btn--ghost action-btn" type="button" data-log="${esc(v.registration)}">Log result</button></div>`;
+      return `<tr data-reg="${esc(v.registration)}">
+        <td><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a>
+          <div class="small muted">${esc(v.class_short)} · ${esc(v.make)} ${esc(v.model)}${m.scope.level === "base" ? "" : " · " + esc(v.base_name)}</div></td>
+        <td>${due}</td>
+        <td>${booking}</td>
+        <td class="work-action">${action}</td>
+      </tr>`;
+    }
+
+    function thisWeek(iso) { return iso >= today() && iso <= NB.isoToday(7); }
+
+    function bookInline(v, check) {
+      const isSvc = check === "service";
+      const s = S(v, check);
+      const daysLeft = isSvc ? Math.round((NB.parseDate(s.effective_due_date) - NB.parseDate(today())) / 864e5) : v.days_to_due;
+      const suggested = NB.isoToday(daysLeft > 3 ? Math.min(daysLeft - 2, 14) : 1);
+      const opts = isSvc ? c.providers : c.centres;
+      // default place: where it went last time / its base's usual one
+      const usual = isSvc ? (s.booking_provider || "") : (s.booking_centre || "");
+      const pick = opts.find(o => o.name === usual) || opts.find(o => o.name.startsWith(v.base_name)) || opts[0];
+      return `<form class="book-inline" data-book-reg="${esc(v.registration)}" novalidate>
+          <label class="visually-hidden" for="bd-${esc(v.registration)}">Date</label>
+          <input class="input" id="bd-${esc(v.registration)}" type="date" value="${suggested}" min="${today()}" max="${NB.isoToday(120)}" required>
+          <label class="visually-hidden" for="bc-${esc(v.registration)}">${isSvc ? "Workshop" : "Test centre"}</label>
+          <select class="input" id="bc-${esc(v.registration)}">${opts.map(o => `<option value="${o.id}"${o.id === pick.id ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+          <button class="btn btn--go" type="submit">Book</button>
+          <span class="field__error" role="alert"></span>
+        </form>`;
+    }
+
+    function wireWork(root, check, view) {
+      // Book (inline)
+      root.querySelectorAll("form.book-inline").forEach(f => f.addEventListener("submit", async e => {
+        e.preventDefault();
+        const reg = f.dataset.bookReg, isSvc = check === "service";
+        const [dateEl, placeEl] = f.querySelectorAll("input, select");
+        const err = f.querySelector(".field__error");
+        err.textContent = "";
+        if (!dateEl.value || dateEl.value < today()) { err.textContent = "Pick a date from today on."; return; }
+        const args = { p_registration: reg, p_date: dateEl.value, p_notes: "", p_person: m.person.code };
+        if (isSvc) args.p_provider_id = +placeEl.value; else args.p_centre_id = +placeEl.value;
+        f.querySelector("button").disabled = true;
+        const r = await NB.db.rpc(isSvc ? "book_service" : "book_mot", args);
+        if (r.error) { err.textContent = NB.friendlyError(r.error); f.querySelector("button").disabled = false; return; }
+        await reload();
+        flash = `<strong>Booked</strong>${esc(reg)} – ${isSvc ? "service" : "MOT"} on ${fmtDate(dateEl.value)} at ${esc(placeEl.selectedOptions[0].textContent)}.`;
+        render();
+      }));
+      // Change date / book from search: swap the action cell for the inline booking form
+      root.querySelectorAll("[data-rebook]").forEach(b => b.addEventListener("click", () => {
+        const v = c.vehicleByReg.get(b.dataset.rebook);
+        const cell = b.closest("td");
+        cell.innerHTML = bookInline(v, check);
+        wireWork(cell, check, view);
+        cell.querySelector("input").focus();
+      }));
+      // Log result: open the panel under the row
+      root.querySelectorAll("[data-log]").forEach(b => b.addEventListener("click", () => openResultPanel(b.closest("tr"), b.dataset.log, check)));
+    }
+
+    /* Result panel: same care as the old FleetHub form – check, warnings, confirm, clash check */
+    const DAYNUMS = Array.from({ length: 31 }, (_, i) => i + 1);
+    async function openResultPanel(tr, reg, check) {
+      const open = tr.nextElementSibling;
+      if (open && open.classList.contains("panel-row")) { open.remove(); return; }
+      main.querySelectorAll("tr.panel-row").forEach(p => p.remove());
+      const v = c.vehicleByReg.get(reg);
+      const isSvc = check === "service";
+      const s = S(v, check);
+      const testDay = s.booking_date && s.booking_date <= today() ? s.booking_date : today();
+      // Snapshot: the newest record id now, so we can tell if someone else logs one before we save
+      const snapQ = isSvc
+        ? NB.db.from("service_records").select("id").eq("vehicle_id", v.id).order("id", { ascending: false })
+        : NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false });
+      const snap = await snapQ;
+      const snapshotId = snap.data && snap.data[0] ? snap.data[0].id : 0;
+
+      const row = document.createElement("tr");
+      row.className = "panel-row";
+      const opts = isSvc ? c.providers : c.centres;
+      const usual = isSvc ? s.booking_provider : s.booking_centre;
+      const placeOpts = opts.map(o => `<option value="${o.id}"${o.name === usual ? " selected" : ""}>${esc(o.name)}</option>`).join("");
+      const yearNow = new Date().getFullYear();
+      row.innerHTML = `<td colspan="4"><form class="result-panel" novalidate>
+        <h3>${isSvc ? "Log service" : "Log MOT result"} – <span class="reg">${esc(reg)}</span></h3>
+        <div class="result-edit">
+          <div class="field-row">
+            <div class="field"><label>${isSvc ? "Service date" : "Test date"}</label>
+              <input class="input" name="date" type="date" value="${testDay}" max="${today()}" min="${NB.isoToday(-90)}"></div>
+            <div class="field"><label>${isSvc ? "Type" : "Result"}</label>
+              <div class="segmented" role="group">${isSvc
+                ? ["Interim", "Full"].map(t => `<button type="button" data-pick="${t}" aria-pressed="${t === (s.last_service_type === "Interim" ? "Full" : "Interim")}">${t}</button>`).join("")
+                : ["Pass", "Fail"].map(t => `<button type="button" data-pick="${t}" aria-pressed="${t === "Pass"}">${t}</button>`).join("")}</div></div>
+            <div class="field"><label>${isSvc ? "Odometer" : "Mileage on certificate"}</label>
+              <input class="input" name="miles" type="number" inputmode="numeric" min="0" value="${v.odometer ? v.odometer + 10 : ""}">
+              <div class="field__hint">Odometer yesterday: ${fmtNum(v.odometer)}</div></div>
+            <div class="field"><label>${isSvc ? "Workshop" : "Test centre"}</label><select class="input" name="place">${placeOpts}</select></div>
+          </div>
+          ${isSvc ? `
+          <div class="field-row">
+            <div class="field"><label>Labour (£)</label><input class="input" name="labour" type="number" min="0" step="0.01"></div>
+            <div class="field"><label>Parts (£)</label><input class="input" name="parts" type="number" min="0" step="0.01"></div>
+          </div>
+          <div class="field"><label>Defects found and fixed <span class="muted">(one per line, optional)</span></label><textarea name="notes" rows="2"></textarea></div>`
+          : `
+          <div class="field" data-expiry>
+            <label>New expiry date <span class="muted">(from the certificate)</span></label>
+            <div class="row" style="flex-wrap:nowrap">
+              <select class="input" name="eday" aria-label="Day">${DAYNUMS.map(d => `<option>${d}</option>`).join("")}</select>
+              <select class="input" name="emonth" aria-label="Month">${MONTHS.map((mo, i) => `<option value="${i + 1}">${mo}</option>`).join("")}</select>
+              <select class="input" name="eyear" aria-label="Year">${[yearNow, yearNow + 1, yearNow + 2].map(y => `<option>${y}</option>`).join("")}</select>
+            </div>
+            <div class="field__hint" data-expiry-hint>Filled in using the MOT rules – change it if the certificate differs.</div>
+          </div>
+          <div class="field" data-fails hidden><label>Reasons for failure <span class="muted">(one per line)</span></label><textarea name="fails" rows="2"></textarea></div>
+          <div class="field"><label>Advisories <span class="muted">(one per line, optional)</span></label><textarea name="notes" rows="2"></textarea></div>`}
+          <p class="field__error" data-err role="alert"></p>
+          <div class="row"><button class="btn btn--primary" type="submit">Check</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
+        </div>
+        <div class="result-check" hidden></div>
+      </form></td>`;
+      tr.after(row);
+      const f = row.querySelector("form");
+      const $f = n => f.elements[n];
+      let pick = f.querySelector('[data-pick][aria-pressed="true"]').dataset.pick;
+      f.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
+        pick = b.dataset.pick;
+        f.querySelectorAll("[data-pick]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+        if (!isSvc) {
+          f.querySelector("[data-expiry]").hidden = pick === "Fail";
+          f.querySelector("[data-fails]").hidden = pick !== "Fail";
+        } else {
+          if (!$f("labour").dataset.touched) $f("labour").value = pick === "Full" ? 295 : 185;
+          if (!$f("parts").dataset.touched) $f("parts").value = pick === "Full" ? 165 : 85;
+        }
+      }));
+      if (isSvc) {
+        ["labour", "parts"].forEach(n => $f(n).addEventListener("input", () => { $f(n).dataset.touched = "1"; }));
+        f.querySelector('[data-pick][aria-pressed="true"]').click();
+      }
+      // MOT: suggest the expiry for the chosen test date
+      let suggestedExpiry = null;
+      async function suggest() {
+        if (isSvc) return;
+        const r = await NB.db.rpc("mot_expiry_for", { p_vehicle_id: v.id, p_test_date: $f("date").value });
+        if (r.error || !r.data) return;
+        suggestedExpiry = r.data;
+        const d = NB.parseDate(r.data);
+        $f("eday").value = String(d.getDate()); $f("emonth").value = String(d.getMonth() + 1);
+        if (![...$f("eyear").options].some(o => o.value === String(d.getFullYear()))) $f("eyear").add(new Option(d.getFullYear()));
+        $f("eyear").value = String(d.getFullYear());
+      }
+      if (!isSvc) { $f("date").addEventListener("change", suggest); suggest(); }
+      f.querySelector("[data-cancel]").addEventListener("click", () => row.remove());
+      f.querySelector('[name="miles"]').focus();
+
+      const lines = t => (t || "").split("\n").map(x => x.trim()).filter(Boolean);
+      let pending = null;
+
+      f.addEventListener("submit", e => {
+        e.preventDefault();
+        const err = f.querySelector("[data-err]");
+        err.textContent = "";
+        const date = $f("date").value, miles = parseInt($f("miles").value, 10);
+        const errors = [], warnings = [];
+        if (!date) errors.push(`Enter the ${isSvc ? "service" : "test"} date.`);
+        else if (date > today()) errors.push("The date can't be in the future.");
+        if (!(miles >= 0)) errors.push(isSvc ? "Enter the odometer reading." : "Enter the mileage from the certificate.");
+        let expiry = null;
+        if (!isSvc && pick === "Pass") {
+          const y = +$f("eyear").value, mo = +$f("emonth").value, d = +$f("eday").value;
+          const dt = new Date(y, mo - 1, d);
+          if (dt.getMonth() !== mo - 1) errors.push("That expiry day doesn't exist in that month.");
+          else {
+            expiry = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            if (date) {
+              const months = (NB.parseDate(expiry) - NB.parseDate(date)) / (30.44 * 864e5);
+              if (expiry <= date) errors.push("The expiry must be after the test date.");
+              else if (months < 11) warnings.push("The new expiry is less than 11 months after the test.");
+              else if (months > 13) warnings.push("The new expiry is more than 13 months after the test.");
+            }
+            if (suggestedExpiry && expiry !== suggestedExpiry) warnings.push(`The MOT rules would give ${fmtDate(suggestedExpiry)} – check the certificate.`);
+            // Tested more than a month before the old expiry: the van loses some MOT time
+            if (date && v.due_date > date) {
+              const keep = new Date(NB.parseDate(v.due_date)); keep.setMonth(keep.getMonth() - 1); keep.setDate(keep.getDate() + 1);
+              if (NB.parseDate(date) < keep) {
+                const lost = Math.round((NB.parseDate(v.due_date) - NB.parseDate(date)) / 864e5) - 1;
+                warnings.push(`Tested more than a month before the old expiry (${fmtDate(v.due_date)}), so about ${lost} days of MOT are lost.`);
+              }
+            }
+          }
+        }
+        if (!isSvc && pick === "Fail" && !lines($f("fails").value).length) errors.push("Add at least one reason for failure.");
+        if (miles >= 0 && v.odometer) {
+          if (miles < v.odometer) warnings.push(`That's lower than yesterday's odometer (${fmtNum(v.odometer)}).`);
+          if (miles > v.odometer + 500) warnings.push(`That's ${fmtNum(miles - v.odometer)} miles more than yesterday's odometer.`);
+        }
+        if (s.booking_date && date && date < s.booking_date) warnings.push(`That's before the booking (${fmtDate(s.booking_date)}).`);
+        if (isSvc) {
+          const cost = (+$f("labour").value || 0) + (+$f("parts").value || 0);
+          if (cost > 1500) warnings.push(`£${fmtNum(cost)} is a lot for a service – check the invoice.`);
+          if (s.last_service_type && pick === s.last_service_type) warnings.push(`The last service was also ${pick.toLowerCase()} – they usually alternate.`);
+        }
+        if (errors.length) { err.innerHTML = errors.map(esc).join("<br>"); return; }
+
+        pending = isSvc
+          ? { fn: "record_service", args: {
+                p_registration: reg, p_service_date: date, p_odometer: miles, p_service_type: pick,
+                p_provider_id: +$f("place").value,
+                p_work_done: pick === "Full" ? "Oil and filter change|Air and fuel filters|Brake fluid check|Full safety inspection" : "Oil and filter change|Safety inspection",
+                p_defects: lines($f("notes").value).join("|"),
+                p_labour_cost: +$f("labour").value || 0, p_parts_cost: +$f("parts").value || 0, p_person: m.person.code } }
+          : { fn: "record_mot", args: {
+                p_registration: reg, p_test_date: date, p_result: pick, p_mileage: miles,
+                p_centre_id: +$f("place").value, p_advisories: lines($f("notes").value).join("|"),
+                p_failure_reasons: pick === "Fail" ? lines($f("fails").value).join("|") : "",
+                p_expiry_date: expiry, p_person: m.person.code } };
+        const place = $f("place").selectedOptions[0].textContent;
+        const summary = isSvc
+          ? [["Vehicle", reg], ["Service date", fmtDate(date)], ["Type", pick], ["Odometer", fmtNum(miles)], ["Workshop", place],
+             ["Defects fixed", lines($f("notes").value).join("; ") || "None"],
+             ["Cost", "£" + fmtNum((+$f("labour").value || 0) + (+$f("parts").value || 0))]]
+          : [["Vehicle", reg], ["Test date", fmtDate(date)], ["Result", pick],
+             ["New expiry", pick === "Pass" ? fmtDate(expiry) : "Not applicable – the old expiry stands"],
+             ["Mileage", fmtNum(miles)], ["Test centre", place],
+             ...(pick === "Fail" ? [["Failed on", lines($f("fails").value).join("; ")]] : []),
+             ["Advisories", lines($f("notes").value).join("; ") || "None"]];
+        summary.push(["Recorded by", m.person.name]);
+        const box = f.querySelector(".result-check");
+        box.innerHTML = `
+          ${warnings.length ? `<div class="alert alert--warn"><strong>Please check before saving:</strong>${warnings.map(esc).join("<br>")}</div>` : ""}
+          <dl class="facts" style="margin:var(--space-3) 0">${summary.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}</dl>
+          <p class="field__error" data-err2 role="alert"></p>
+          <div class="row"><button class="btn btn--go" type="button" data-confirm>Confirm and save</button>
+            <button class="btn btn--ghost" type="button" data-edit>Back to edit</button></div>`;
+        f.querySelector(".result-edit").hidden = true;
+        box.hidden = false;
+        box.querySelector("[data-confirm]").focus();
+        box.querySelector("[data-edit]").addEventListener("click", () => { box.hidden = true; f.querySelector(".result-edit").hidden = false; });
+        box.querySelector("[data-confirm]").addEventListener("click", async ev => {
+          const btn = ev.currentTarget, err2 = box.querySelector("[data-err2]");
+          btn.disabled = true;
+          // Clash check: has anyone logged a record for this van since the panel opened?
+          const now = await (isSvc
+            ? NB.db.from("service_records").select("id").eq("vehicle_id", v.id).order("id", { ascending: false })
+            : NB.db.from("mot_tests").select("id").eq("vehicle_id", v.id).order("id", { ascending: false }));
+          const latest = now && now.data && now.data[0] ? now.data[0].id : 0;
+          if (latest !== snapshotId) {
+            err2.innerHTML = `Someone has logged a ${isSvc ? "service" : "MOT"} for ${esc(reg)} since you opened this. <strong>Nothing has been saved.</strong> Refresh and check whether another is still needed.`;
+            return;
+          }
+          const r = await NB.db.rpc(pending.fn, pending.args);
+          if (r.error) { err2.textContent = NB.friendlyError(r.error); btn.disabled = false; return; }
+          await reload();
+          const nv = c.vehicleByReg.get(reg);
+          flash = isSvc
+            ? `<strong>Saved</strong>${esc(reg)} serviced – next due at ${fmtNum(nv.svc.due_odometer)} miles or ${fmtDate(nv.svc.due_date)}.`
+            : pick === "Pass"
+              ? `<strong>Saved</strong>${esc(reg)} passed – MOT now due ${fmtDate(nv.due_date)}.`
+              : `<strong>Saved</strong>${esc(reg)} failed – it's back in “To book” as a retest. The old expiry (${fmtDate(nv.due_date)}) still stands.`;
+          render();
+        });
+      });
     }
 
     /* ---------------- VEHICLE "SPORTS CARD" ---------------- */
@@ -865,9 +1254,32 @@
     const dlg = document.getElementById("bookDialog");
     let bookReg = null, bookKind = "mot";
     function openBook(reg, kind) {
-      const v = c.vehicleByReg.get(reg);
-      bookReg = reg; bookKind = kind;
+      bookKind = kind;
       const isSvc = kind === "service";
+      const vehField = document.getElementById("bookVehField"), vehSel = document.getElementById("bookVeh");
+      if (!reg) {
+        // Opened from "Book an MOT / a service": choose the van, ones needing booking first
+        const mine = c.vehicles.filter(x => inView(x, defaultView()));
+        const needs = x => { const st = S(x, kind); return st.status !== "OK" && !st.booked; };
+        const sorted = mine.filter(needs).sort((a, b) => dueSort(a, b, kind)).concat(mine.filter(x => !needs(x)).sort((a, b) => a.registration.localeCompare(b.registration)));
+        vehSel.innerHTML = sorted.map(x => {
+          const st = S(x, kind);
+          const note = needs(x) ? ` – ${st.status.toLowerCase()}, not booked` : st.booked ? ` – booked ${fmtDate(st.booking_date)}` : "";
+          return `<option value="${esc(x.registration)}">${esc(x.registration)} (${esc(x.base_name)})${note}</option>`;
+        }).join("");
+        vehField.hidden = false;
+        vehSel.onchange = () => fillBook(vehSel.value);
+        reg = vehSel.value;
+      } else {
+        vehField.hidden = true;
+      }
+      fillBook(reg);
+      dlg.showModal();
+    }
+    function fillBook(reg) {
+      const kind = bookKind, isSvc = kind === "service";
+      const v = c.vehicleByReg.get(reg);
+      bookReg = reg;
       const s = isSvc ? v.svc : v;
       document.getElementById("bookTitle").textContent = (isSvc ? "Book service – " : "Book MOT – ") + reg;
       document.getElementById("bookCentreLabel").textContent = isSvc ? "Workshop" : "Test centre";
@@ -881,7 +1293,6 @@
       document.getElementById("bookCentre").innerHTML = opts.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
       document.getElementById("bookNotes").value = s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "Off road until MOT") : "";
       document.getElementById("bookError").textContent = "";
-      dlg.showModal();
     }
     dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
     document.getElementById("bookForm").addEventListener("submit", async e => {
@@ -912,6 +1323,7 @@
         else if (parts[0] === "van" && parts[1]) await renderVan(parts[1].toUpperCase());
         else if (parts[0] === "record") renderRecord(q);
         else if (parts[0] === "record-service") renderRecordService(q);
+        else if (parts[0] === "work") renderWork(q);
         else renderHome(q);
         window.scrollTo(0, 0);
       } catch (err) {
@@ -924,6 +1336,7 @@
         c = await NB.loadAll();
         m = NB.requireMe(c);
         NB.showWho(m);
+        if (m.role.can_record) document.querySelector('[data-nav="work"]').hidden = false;
         document.title = "neptsBI – " + m.person.name;
         window.addEventListener("hashchange", render);
         render();
