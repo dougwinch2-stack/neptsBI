@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>neptsBI</title>
+  <meta name="dougs-wallboard" content="on">
+  <link rel="stylesheet" href="dougs.css">
+  <link rel="stylesheet" href="neptsbi.css">
+  <script src="dougs.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="neptsbi.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__inner">
+      <a class="app-header__title logo" href="#/">nepts<span class="logo__bi">BI</span></a>
+      <nav class="app-header__nav" aria-label="Main">
+        <a href="#/" data-nav="home">Home</a>
+        <a href="#/list?status=all" data-nav="list">Vehicles</a>
+      </nav>
+      <p class="who" id="who" hidden></p>
+    </div>
+  </header>
+
+  <main id="main" class="container container--wide" tabindex="-1">
+    <p class="status-line">Loading…</p>
+  </main>
+
+  <dialog id="bookDialog" class="dialog" aria-labelledby="bookTitle">
+    <form id="bookForm" class="stack" method="dialog">
+      <h2 id="bookTitle">Book MOT</h2>
+      <div class="field">
+        <label for="bookDate">Appointment date</label>
+        <input id="bookDate" type="date" required>
+      </div>
+      <div class="field">
+        <label for="bookCentre">Test centre</label>
+        <select id="bookCentre"></select>
+      </div>
+      <div class="field">
+        <label for="bookNotes">Notes <span class="muted">(optional)</span></label>
+        <input id="bookNotes" type="text" maxlength="500" placeholder="e.g. Off road until MOT">
+      </div>
+      <p id="bookError" class="field__error" role="alert"></p>
+      <div class="row">
+        <button class="btn btn--go" type="submit" value="save">Book</button>
+        <button class="btn btn--ghost" type="button" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+  (function () {
+    "use strict";
+    const main = document.getElementById("main");
+    const { esc, fmtDate, fmtNum, daysText, statusBadge, bookingBadge } = NB;
+    let c = null;      // cached data
+    let m = null;      // who is signed in
+    let flash = "";    // one-off message shown on the next page
+
+    const CHECKS = [   // rows of the check grid; only MOT is live so far
+      { key: "mot", label: "MOT", live: true },
+      { key: "service", label: "Service" },
+      { key: "clean", label: "Deep clean" },
+      { key: "oxygen", label: "Oxygen" },
+      { key: "fire", label: "Fire extinguisher" },
+      { key: "defib", label: "Defib" }
+    ];
+
+    /* ---------------- helpers ---------------- */
+
+    function parseHash() {
+      const raw = location.hash.replace(/^#\/?/, "");
+      const [path, query] = raw.split("?");
+      return { parts: (path || "").split("/").filter(Boolean).map(decodeURIComponent),
+               q: new URLSearchParams(query || "") };
+    }
+    function link(path, params) {
+      const q = new URLSearchParams();
+      Object.entries(params || {}).forEach(([k, v]) => { if (v != null && v !== "") q.set(k, v); });
+      const s = q.toString();
+      return "#/" + path + (s ? "?" + s : "");
+    }
+
+    // What slice of the company is being looked at: "all", "r:<regionId>" or "b:<baseId>"
+    function defaultView() {
+      if (m.scope.level === "base") return "b:" + m.scope.baseId;
+      if (m.scope.level === "region") return "r:" + m.scope.regionId;
+      return "all";
+    }
+    function allowedView(view) {
+      if (!view) return defaultView();
+      const [kind, id] = view.split(":");
+      if (m.scope.level === "company") return view;
+      if (m.scope.level === "region") {
+        if (kind === "r" && +id === m.scope.regionId) return view;
+        if (kind === "b" && c.baseById.get(+id) && c.baseById.get(+id).region_id === m.scope.regionId) return view;
+        return defaultView();
+      }
+      return defaultView();
+    }
+    function inView(v, view) {
+      const [kind, id] = view.split(":");
+      if (kind === "r") return v.region_id === +id;
+      if (kind === "b") return v.base_id === +id;
+      return true;
+    }
+    function viewName(view) {
+      const [kind, id] = view.split(":");
+      if (kind === "r") return c.regionById.get(+id).name;
+      if (kind === "b") return c.baseById.get(+id).name;
+      return "the whole company";
+    }
+    function viewOptions(current) {
+      const opts = [];
+      if (m.scope.level === "company") opts.push(["all", "Whole company"]);
+      c.regions.forEach(r => {
+        if (m.scope.level === "company" || r.id === m.scope.regionId) {
+          opts.push(["r:" + r.id, (m.scope.level === "region" ? "All of " : "Region: ") + r.name]);
+          c.bases.filter(b => b.region_id === r.id).forEach(b => opts.push(["b:" + b.id, "  " + b.name]));
+        }
+      });
+      return opts.map(([v, l]) => `<option value="${v}"${v === current ? " selected" : ""}>${esc(l)}</option>`).join("");
+    }
+
+    function counts(list) {
+      const overdue = list.filter(v => v.status === "Overdue");
+      const soon = list.filter(v => v.status === "Due soon");
+      const notBooked = list.filter(v => v.status !== "OK" && !v.booked);
+      return { total: list.length, overdue: overdue.length, soon: soon.length, notBooked: notBooked.length,
+               compliance: list.length ? (list.length - overdue.length) / list.length * 100 : 100 };
+    }
+
+    function numLink(n, href, tone) {
+      const cls = n === 0 ? "big-num big-num--zero" : "big-num" + (tone ? " big-num--" + tone : "");
+      return `<a class="${cls}" href="${href}" aria-label="${n} – show the list">${n}</a>`;
+    }
+
+    function setNav(which) {
+      document.querySelectorAll("[data-nav]").forEach(a => {
+        if (a.dataset.nav === which) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+      });
+    }
+
+    function flashHtml() {
+      if (!flash) return "";
+      const html = `<div class="alert alert--ok" role="status">${flash}</div>`;
+      flash = "";
+      return html;
+    }
+
+    /* ---------------- HOME ---------------- */
+
+    function renderHome(q) {
+      setNav("home");
+      if (m.role.key === "driver") return renderDriverHome();
+
+      const view = allowedView(q.get("view"));
+      const list = c.vehicles.filter(v => inView(v, view));
+      const k = counts(list);
+      const L = (status) => link("list", { status, view });
+      const canChoose = m.scope.level !== "base";
+
+      let html = flashHtml();
+      html += `<div class="row row--between" style="align-items:end">
+          <div>
+            <p class="card__eyebrow">${esc(m.role.label)}</p>
+            <h1 style="margin:0">Vehicle checks – for ${fmtNum(k.total)} vehicles ${view === "all" ? "across" : "at"} ${esc(viewName(view))}</h1>
+          </div>
+          ${canChoose ? `<div class="field" style="min-width:220px">
+              <label for="viewSelect">Showing</label>
+              <select id="viewSelect">${viewOptions(view)}</select>
+            </div>` : ""}
+        </div>`;
+
+      // Headline tiles
+      const tiles = [
+        `<a class="tile tile--info" href="${L("all")}"><div class="tile__value">${fmtNum(k.total)}</div><div class="tile__label">Vehicles</div></a>`,
+        `<a class="tile ${k.overdue ? "tile--warn" : "tile--ok"}" href="${L("all")}"><div class="tile__value">${k.compliance.toFixed(1)}%</div><div class="tile__label">MOT compliant</div></a>`,
+        `<a class="tile ${k.overdue ? "tile--danger" : "tile--ok"}" href="${L("overdue")}"><div class="tile__value">${k.overdue}</div><div class="tile__label">Off road – MOT overdue</div></a>`,
+        `<a class="tile ${k.notBooked ? "tile--warn" : "tile--ok"}" href="${L("notbooked")}"><div class="tile__value">${k.notBooked}</div><div class="tile__label">Need booking</div></a>`
+      ];
+      html += `<div class="tiles" style="margin-top:var(--space-4)">${tiles.join("")}</div>`;
+
+      // The check grid (Doug's Power BI layout)
+      html += `<h2 class="section-title">Checks</h2>
+        <div class="table-wrap"><table class="check-grid">
+          <thead><tr><th scope="col" style="text-align:left">${fmtNum(k.total)} vehicles</th>
+            <th scope="col">Overdue</th><th scope="col" title="Due in the next ${c.rules.mot_warning_days.value} days">Due soon</th><th scope="col">Not booked</th></tr></thead>
+          <tbody>${CHECKS.map(ch => ch.live
+            ? `<tr><th scope="row">${ch.label}</th>
+                 <td>${numLink(k.overdue, L("overdue"), "danger")}</td>
+                 <td>${numLink(k.soon, L("due"), "warn")}</td>
+                 <td>${numLink(k.notBooked, L("notbooked"), "warn")}</td></tr>`
+            : `<tr class="soon"><th scope="row">${ch.label}</th>
+                 <td colspan="3"><span class="big-num big-num--na">Coming soon</span></td></tr>`).join("")}
+          </tbody></table></div>`;
+
+      // Company / region: break down by base
+      if (view === "all" || view.startsWith("r:")) {
+        const regions = c.regions.filter(r => view === "all" || "r:" + r.id === view);
+        const rows = [];
+        regions.forEach(r => {
+          c.bases.filter(b => b.region_id === r.id).forEach(b => {
+            const bv = "b:" + b.id;
+            const bk = counts(list.filter(v => v.base_id === b.id));
+            rows.push(`<tr>
+              <td>${esc(r.name)}</td>
+              <td><a href="${link("", { view: bv })}">${esc(b.name)}</a></td>
+              <td class="num"><a href="${link("list", { status: "all", view: bv })}">${bk.total}</a></td>
+              <td class="num">${bk.overdue ? `<a class="text-danger" href="${link("list", { status: "overdue", view: bv })}">${bk.overdue}</a>` : "0"}</td>
+              <td class="num">${bk.soon ? `<a href="${link("list", { status: "due", view: bv })}">${bk.soon}</a>` : "0"}</td>
+              <td class="num">${bk.notBooked ? `<a href="${link("list", { status: "notbooked", view: bv })}">${bk.notBooked}</a>` : "0"}</td>
+              <td class="num">${bk.compliance.toFixed(1)}%</td>
+            </tr>`);
+          });
+        });
+        html += `<h2 class="section-title">By base</h2>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>Region</th><th>Base</th><th class="num">Vehicles</th><th class="num">MOT overdue</th>
+              <th class="num">Due soon</th><th class="num">Not booked</th><th class="num">MOT compliant</th></tr></thead>
+            <tbody>${rows.join("")}</tbody></table></div>`;
+      }
+
+      // Base / region: the vans needing action, with buttons
+      if (view !== "all") {
+        const action = list.filter(v => v.status !== "OK").sort((a, b) => a.days_to_due - b.days_to_due);
+        html += `<h2 class="section-title">Needs action</h2>` + vehicleTable(action, true, view.startsWith("b:"));
+      }
+
+      main.innerHTML = html;
+      const sel = document.getElementById("viewSelect");
+      if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
+      wireTable();
+    }
+
+    function renderDriverHome() {
+      const base = c.baseById.get(m.person.base_id);
+      const list = c.vehicles.filter(v => v.base_id === base.id);
+      const off = list.filter(v => v.status === "Overdue");
+      main.innerHTML = flashHtml() + `
+        <p class="card__eyebrow">${esc(m.role.label)} · ${esc(base.name)}</p>
+        <h1>Hello, ${esc(m.person.name)}</h1>
+        <div class="grid" style="--min: 280px">
+          <article class="card card--info">
+            <div class="card__eyebrow">Today</div>
+            <h2 class="card__title">Your checks</h2>
+            <ul class="item-list">
+              <li>Daily vehicle check <span class="badge badge--neutral">Coming soon</span></li>
+              <li>Base checks assigned to you <span class="badge badge--neutral">Coming soon</span></li>
+              <li>How-to guide for each check <span class="badge badge--neutral">Coming soon</span></li>
+            </ul>
+          </article>
+          <article class="card ${off.length ? "card--danger" : "card--ok"}">
+            <div class="card__eyebrow">${esc(base.name)}</div>
+            <h2 class="card__title">Off the road today</h2>
+            ${off.length ? `<ul class="item-list">${off.map(v =>
+              `<li><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a> – MOT ran out ${fmtDate(v.due_date)}</li>`).join("")}</ul>
+              <p class="card__desc">Don't take these out until the MOT is done.</p>`
+              : `<p class="card__desc">Every vehicle at ${esc(base.name)} has a valid MOT.</p>`}
+          </article>
+        </div>`;
+    }
+
+    /* ---------------- LIST (drill-down) ---------------- */
+
+    const STATUS_TITLES = {
+      overdue: "MOT overdue", due: "MOT due soon", notbooked: "MOT needs booking", ok: "MOT OK", all: "All vehicles"
+    };
+
+    function renderList(q) {
+      const status = STATUS_TITLES[q.get("status")] ? q.get("status") : "all";
+      const view = allowedView(q.get("view"));
+      setNav(status === "all" && view === defaultView() ? "list" : "");
+      let list = c.vehicles.filter(v => inView(v, view));
+      if (status === "overdue") list = list.filter(v => v.status === "Overdue");
+      if (status === "due") list = list.filter(v => v.status === "Due soon");
+      if (status === "notbooked") list = list.filter(v => v.status !== "OK" && !v.booked);
+      if (status === "ok") list = list.filter(v => v.status === "OK");
+      const search = (q.get("find") || "").trim().toUpperCase();
+      if (search) list = list.filter(v =>
+        (v.registration + " " + v.fleet_number + " " + v.make + " " + v.model + " " + v.class_short).toUpperCase().includes(search));
+      list.sort((a, b) => a.days_to_due - b.days_to_due || a.registration.localeCompare(b.registration));
+
+      main.innerHTML = `
+        <a class="back-link" href="${link("", { view })}">Back to ${esc(viewName(view))}</a>
+        <h1>${STATUS_TITLES[status]} – ${esc(viewName(view))} <span class="muted">(${list.length})</span></h1>
+        <form id="filters" class="toolbar" style="margin-bottom:var(--space-4)">
+          ${m.scope.level !== "base" ? `<div class="field"><label for="fView">Showing</label><select id="fView">${viewOptions(view)}</select></div>` : ""}
+          <div class="field"><label for="fStatus">MOT</label>
+            <select id="fStatus">${Object.entries(STATUS_TITLES).map(([k, l]) =>
+              `<option value="${k}"${k === status ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+          <div class="field"><label for="fFind">Find</label>
+            <input id="fFind" type="search" placeholder="Reg, make, type…" value="${esc(q.get("find") || "")}"></div>
+        </form>
+        ${list.length ? vehicleTable(list, false, view.startsWith("b:")) : `<div class="empty">Nothing here – all good.</div>`}`;
+
+      const go = () => {
+        const fv = document.getElementById("fView");
+        location.hash = link("list", { status: document.getElementById("fStatus").value,
+          view: fv ? fv.value : view, find: document.getElementById("fFind").value.trim() });
+      };
+      document.getElementById("fStatus").addEventListener("change", go);
+      const fv = document.getElementById("fView");
+      if (fv) fv.addEventListener("change", go);
+      let t;
+      const find = document.getElementById("fFind");
+      find.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { go(); }, 500); });
+      document.getElementById("filters").addEventListener("submit", e => { e.preventDefault(); go(); });
+      if (q.get("find") != null) { find.focus(); find.setSelectionRange(find.value.length, find.value.length); }
+      wireTable();
+    }
+
+    function vehicleTable(list, withActions, oneBase) {
+      if (!list.length) return `<div class="empty">Nothing needs action – every MOT is in date and booked.</div>`;
+      const canRecord = m.role.can_record;
+      return `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Vehicle</th>${oneBase ? "" : "<th>Base</th>"}<th>Type</th><th>Make &amp; model</th><th>MOT due</th><th>Status</th><th>Booking</th>
+          ${withActions && canRecord ? "<th><span class='visually-hidden'>Actions</span></th>" : ""}</tr></thead>
+        <tbody>${list.map(v => `<tr data-href="${link("van/" + v.registration)}">
+          <td><a class="reg row-link" href="${link("van/" + v.registration)}">${esc(v.registration)}</a></td>
+          ${oneBase ? "" : `<td>${esc(v.base_name)}</td>`}
+          <td>${esc(v.class_short)}</td>
+          <td>${esc(v.make)} ${esc(v.model)}</td>
+          <td class="nums">${fmtDate(v.due_date)}<div class="small muted">${daysText(v.days_to_due)}${v.first_mot ? " · first MOT" : ""}</div></td>
+          <td>${statusBadge(v.status)}</td>
+          <td>${bookingBadge(v)}</td>
+          ${withActions && canRecord ? `<td><div class="row" style="flex-wrap:nowrap">
+              ${!v.booked ? `<button class="btn btn--secondary" type="button" data-book="${esc(v.registration)}">Book</button>` : ""}
+              <a class="btn btn--ghost" href="${link("record", { reg: v.registration })}">Record MOT</a></div></td>` : ""}
+        </tr>`).join("")}</tbody></table></div>`;
+    }
+
+    function wireTable() {
+      main.querySelectorAll("tr[data-href]").forEach(tr => tr.addEventListener("click", e => {
+        if (e.target.closest("a, button")) return;
+        location.hash = tr.dataset.href;
+      }));
+      main.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book)));
+    }
+
+    /* ---------------- VEHICLE "SPORTS CARD" ---------------- */
+
+    async function renderVan(reg) {
+      setNav("");
+      const v = c.vehicleByReg.get(reg);
+      if (!v) { main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="empty">Vehicle ${esc(reg)} not found.</div>`; return; }
+      main.innerHTML = `<p class="status-line">Loading ${esc(reg)}…</p>`;
+      const res = await NB.db.from("mot_history").select("*").eq("vehicle_id", v.id).order("test_date", { ascending: false }).order("id", { ascending: false });
+      if (res.error) throw res.error;
+      const hist = res.data;
+      const passes = hist.filter(h => h.result === "Pass" && h.mileage != null);
+      let perYear = null;
+      if (passes.length >= 2) {
+        const a = passes[passes.length - 1], b = passes[0];
+        const yrs = (NB.parseDate(b.test_date) - NB.parseDate(a.test_date)) / (365.25 * 864e5);
+        if (yrs > 0.5) perYear = Math.round((b.mileage - a.mileage) / yrs / 100) * 100;
+      }
+      const lastPass = hist.find(h => h.result === "Pass");
+      const lastAdvisories = lastPass && lastPass.advisories ? lastPass.advisories.split("|") : [];
+      const fails = hist.filter(h => h.result === "Fail").length;
+      const tone = { Overdue: "danger", "Due soon": "warn", OK: "ok" }[v.status];
+      const canRecord = m.role.can_record;
+      const age = Math.max(0, Math.floor((Date.now() - NB.parseDate(v.first_registered)) / (365.25 * 864e5)));
+
+      main.innerHTML = flashHtml() + `
+        <a class="back-link" href="javascript:history.back()">Back</a>
+        <div class="van-hero">
+          <article class="card card--${tone}">
+            <div class="card__eyebrow">${esc(v.class_name)}</div>
+            <h1 class="van-hero__reg reg">${esc(v.registration)}</h1>
+            <p style="margin:var(--space-1) 0 var(--space-3)">${esc(v.make)} ${esc(v.model)} · ${esc(v.fuel)}</p>
+            <dl class="facts">
+              <dt>Fleet number</dt><dd>${esc(v.fleet_number)}</dd>
+              <dt>Base</dt><dd>${esc(v.base_name)} · ${esc(v.region_name)}</dd>
+              <dt>First registered</dt><dd>${fmtDate(v.first_registered)} (${age} yr${age === 1 ? "" : "s"})</dd>
+              <dt>Ownership</dt><dd>${esc(v.ownership)}${v.ownership === "Leased" ? ` – ${esc(v.lessor)}, ends ${fmtDate(v.lease_end)}` : ""}</dd>
+            </dl>
+          </article>
+          <div class="tiles">
+            <div class="tile tile--${tone}"><div class="tile__value">${esc(v.status)}</div>
+              <div class="tile__label">MOT · ${v.status === "Overdue" ? "ran out" : "due"} ${fmtDate(v.due_date)}</div>
+              <div class="tile__sub">${daysText(v.days_to_due)}</div></div>
+            <div class="tile tile--info"><div class="tile__value">${fmtNum(v.last_mot_mileage)}</div>
+              <div class="tile__label">Miles at last MOT</div></div>
+            <div class="tile tile--info"><div class="tile__value">${perYear ? fmtNum(perYear) : "–"}</div>
+              <div class="tile__label">Miles a year (from MOTs)</div></div>
+            <div class="tile ${lastAdvisories.length ? "tile--warn" : "tile--ok"}"><div class="tile__value">${lastAdvisories.length}</div>
+              <div class="tile__label">Advisories at last MOT</div></div>
+            <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Service</div></div>
+            <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Tyres</div></div>
+            <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Running cost</div></div>
+          </div>
+        </div>
+
+        <h2 class="section-title">MOT</h2>
+        <article class="card card--${tone}">
+          <div class="row row--between">
+            <div class="stack" style="gap:var(--space-1)">
+              <div>${statusBadge(v.status)} ${bookingBadge(v)}</div>
+              <div>${v.status === "Overdue" ? "Ran out" : "Due"} <strong>${fmtDate(v.due_date)}</strong> – ${daysText(v.days_to_due)}${v.first_mot ? " (first MOT)" : ""}</div>
+              ${v.booked ? `<div>Booked for <strong>${fmtDate(v.booking_date)}</strong> at ${esc(v.booking_centre || "–")}${v.booking_notes ? ` · ${esc(v.booking_notes)}` : ""}</div>` : ""}
+              ${fails ? `<div class="small muted">${fails} failed test${fails === 1 ? "" : "s"} in its history</div>` : ""}
+            </div>
+            ${canRecord ? `<div class="row">
+                <button class="btn btn--secondary" type="button" data-book="${esc(v.registration)}">${v.booked ? "Change booking" : "Book MOT"}</button>
+                <a class="btn btn--primary" href="${link("record", { reg: v.registration })}">Record MOT</a></div>` : ""}
+          </div>
+          ${lastAdvisories.length ? `<h3 style="margin-top:var(--space-4)">Advisories at last MOT</h3>
+              <ul class="item-list">${lastAdvisories.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+        </article>
+
+        <h2 class="section-title">MOT history</h2>
+        ${hist.length ? `<div class="table-wrap"><table class="table">
+          <thead><tr><th>Test date</th><th>Result</th><th>Expiry</th><th class="num">Mileage</th><th>Centre</th><th>Notes</th><th>Recorded</th></tr></thead>
+          <tbody>${hist.map(h => `<tr>
+            <td class="nums">${fmtDate(h.test_date)}</td>
+            <td>${h.result === "Pass" ? '<span class="badge badge--ok">Pass</span>' : '<span class="badge badge--danger">Fail</span>'}</td>
+            <td class="nums">${h.expiry_date ? fmtDate(h.expiry_date) : "–"}</td>
+            <td class="num">${fmtNum(h.mileage)}</td>
+            <td>${esc(h.centre_name || "–")}</td>
+            <td class="small">${h.failure_reasons ? `<strong class="text-danger">Failed:</strong> ${h.failure_reasons.split("|").map(esc).join("; ")}` : ""}
+              ${h.advisories ? `<div><strong>Advisories:</strong> ${h.advisories.split("|").map(esc).join("; ")}</div>` : ""}</td>
+            <td class="small muted">${esc(h.recorded_by || "")}<br>${NB.fmtDateTime(h.recorded_at)}</td>
+          </tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">No MOTs yet – the first is due ${fmtDate(v.due_date)}, 3 years after first registration.</div>`}`;
+      wireTable();
+    }
+
+    /* ---------------- RECORD AN MOT ---------------- */
+
+    function renderRecord(q) {
+      setNav("");
+      if (!m.role.can_record) {
+        main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="alert alert--warn"><strong>Not available</strong>A ${esc(m.role.label)} can view MOTs but not record them.</div>`;
+        return;
+      }
+      const reg = (q.get("reg") || "").toUpperCase();
+      const v = c.vehicleByReg.get(reg);
+      const regs = c.vehicles.filter(x => m.scope.level === "company" ||
+        (m.scope.level === "region" ? x.region_id === m.scope.regionId : x.base_id === m.scope.baseId));
+      main.innerHTML = `
+        <a class="back-link" href="javascript:history.back()">Back</a>
+        <h1>Record an MOT</h1>
+        <form id="motForm" class="form-panel" style="max-width:var(--width-narrow)" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="fReg">Vehicle</label>
+              <select id="fReg" required>
+                <option value="">Choose…</option>
+                ${regs.map(x => `<option value="${esc(x.registration)}"${x.registration === reg ? " selected" : ""}>${esc(x.registration)} – ${esc(x.make)} ${esc(x.model)} (${esc(x.base_name)})</option>`).join("")}
+              </select>
+              <div id="fRegHint" class="field__hint"></div>
+            </div>
+            <div class="field">
+              <label for="fDate">Test date</label>
+              <input id="fDate" type="date" required value="${NB.isoToday()}" max="${NB.isoToday()}" min="${NB.isoToday(-90)}">
+            </div>
+          </div>
+          <fieldset class="field" style="border:0;padding:0;margin:0">
+            <legend class="label">Result</legend>
+            <div class="segmented" role="group" aria-label="Result">
+              <button type="button" data-result="Pass" aria-pressed="true">Pass</button>
+              <button type="button" data-result="Fail" aria-pressed="false">Fail</button>
+            </div>
+          </fieldset>
+          <div class="field-row">
+            <div class="field">
+              <label for="fMileage">Mileage</label>
+              <input id="fMileage" type="number" inputmode="numeric" min="0" step="1" required>
+              <div id="fMileageHint" class="field__hint"></div>
+            </div>
+            <div class="field">
+              <label for="fCentre">Test centre</label>
+              <select id="fCentre">${c.centres.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
+            </div>
+          </div>
+          <div class="field" id="expiryField">
+            <label for="fExpiry">Expiry date (from the certificate)</label>
+            <input id="fExpiry" type="date">
+            <div class="field__hint">Filled in for you using the MOT rules – change it if the certificate says otherwise.</div>
+          </div>
+          <div class="field" id="failField" hidden>
+            <label for="fFails">Reasons for failure <span class="muted">(one per line)</span></label>
+            <textarea id="fFails"></textarea>
+          </div>
+          <div class="field">
+            <label for="fAdv">Advisories <span class="muted">(one per line, optional)</span></label>
+            <textarea id="fAdv"></textarea>
+          </div>
+          <p class="small muted">Will be recorded by <strong>${esc(m.person.name)}</strong>, with today's date and time.</p>
+          <p id="formError" class="field__error" role="alert"></p>
+          <div class="row">
+            <button class="btn btn--go" type="submit">Save MOT</button>
+            <a class="btn btn--ghost" href="javascript:history.back()">Cancel</a>
+          </div>
+        </form>`;
+
+      const $ = id => document.getElementById(id);
+      let result = "Pass";
+
+      function vehicle() { return c.vehicleByReg.get($("fReg").value); }
+
+      async function updateExpiry() {
+        const ve = vehicle();
+        if (result !== "Pass" || !ve || !$("fDate").value) return;
+        const r = await NB.db.rpc("mot_expiry_for", { p_vehicle_id: ve.id, p_test_date: $("fDate").value });
+        if (!r.error && r.data) $("fExpiry").value = r.data;
+      }
+      function updateVehicle() {
+        const ve = vehicle();
+        $("fRegHint").textContent = ve ? `MOT ${ve.status === "Overdue" ? "ran out" : "due"} ${fmtDate(ve.due_date)} (${daysText(ve.days_to_due)})` : "";
+        $("fMileageHint").textContent = ve && ve.last_mot_mileage ? `At the last MOT: ${fmtNum(ve.last_mot_mileage)}` : "";
+        if (ve && ve.last_mot_mileage) $("fMileage").min = ve.last_mot_mileage;
+        if (ve && ve.booking_centre) {
+          const cen = c.centres.find(x => x.name === ve.booking_centre);
+          if (cen) $("fCentre").value = cen.id;
+        }
+        updateExpiry();
+      }
+      main.querySelectorAll("[data-result]").forEach(b => b.addEventListener("click", () => {
+        result = b.dataset.result;
+        main.querySelectorAll("[data-result]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+        $("expiryField").hidden = result !== "Pass";
+        $("failField").hidden = result !== "Fail";
+        updateExpiry();
+      }));
+      $("fReg").addEventListener("change", updateVehicle);
+      $("fDate").addEventListener("change", updateExpiry);
+      updateVehicle();
+
+      $("motForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const err = $("formError");
+        err.textContent = "";
+        const ve = vehicle();
+        const mileage = parseInt($("fMileage").value, 10);
+        if (!ve) { err.textContent = "Choose the vehicle."; $("fReg").focus(); return; }
+        if (!$("fDate").value) { err.textContent = "Enter the test date."; return; }
+        if (!(mileage >= 0)) { err.textContent = "Enter the mileage from the certificate."; $("fMileage").focus(); return; }
+        if (result === "Fail" && !$("fFails").value.trim()) { err.textContent = "Add at least one reason for failure."; $("fFails").focus(); return; }
+        const btn = e.submitter || $("motForm").querySelector("[type=submit]");
+        btn.disabled = true;
+        const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean).join("|");
+        const r = await NB.db.rpc("record_mot", {
+          p_registration: ve.registration, p_test_date: $("fDate").value, p_result: result,
+          p_mileage: mileage, p_centre_id: +$("fCentre").value,
+          p_advisories: lines($("fAdv").value), p_failure_reasons: lines($("fFails").value),
+          p_expiry_date: result === "Pass" && $("fExpiry").value ? $("fExpiry").value : null,
+          p_person: m.person.code
+        });
+        btn.disabled = false;
+        if (r.error) { err.textContent = NB.friendlyError(r.error); return; }
+        await reload();
+        flash = result === "Pass"
+          ? `<strong>MOT saved</strong>${esc(ve.registration)} passed – now due ${fmtDate(c.vehicleByReg.get(ve.registration).due_date)}. Every dashboard has updated.`
+          : `<strong>MOT saved</strong>${esc(ve.registration)} failed – the old expiry date still stands.`;
+        location.replace(link("van/" + ve.registration));
+      });
+    }
+
+    /* ---------------- BOOK (dialog) ---------------- */
+
+    const dlg = document.getElementById("bookDialog");
+    let bookReg = null;
+    function openBook(reg) {
+      const v = c.vehicleByReg.get(reg);
+      bookReg = reg;
+      document.getElementById("bookTitle").textContent = "Book MOT – " + reg;
+      const d = document.getElementById("bookDate");
+      d.min = NB.isoToday(); d.max = NB.isoToday(120);
+      d.value = v.booking_date || NB.isoToday(v.days_to_due > 3 ? Math.min(v.days_to_due - 2, 14) : 1);
+      document.getElementById("bookCentre").innerHTML = c.centres.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+      document.getElementById("bookNotes").value = v.status === "Overdue" ? "Off road until MOT" : "";
+      document.getElementById("bookError").textContent = "";
+      dlg.showModal();
+    }
+    dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
+    document.getElementById("bookForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const r = await NB.db.rpc("book_mot", {
+        p_registration: bookReg, p_date: document.getElementById("bookDate").value,
+        p_centre_id: +document.getElementById("bookCentre").value,
+        p_notes: document.getElementById("bookNotes").value, p_person: m.person.code
+      });
+      if (r.error) { document.getElementById("bookError").textContent = NB.friendlyError(r.error); return; }
+      dlg.close();
+      await reload();
+      flash = `<strong>Booked</strong>${esc(bookReg)} – MOT on ${fmtDate(document.getElementById("bookDate").value)}.`;
+      render();
+    });
+
+    /* ---------------- router ---------------- */
+
+    async function reload() { NB.invalidate(); c = await NB.loadAll(); }
+
+    async function render() {
+      try {
+        const { parts, q } = parseHash();
+        if (parts[0] === "list") renderList(q);
+        else if (parts[0] === "van" && parts[1]) await renderVan(parts[1].toUpperCase());
+        else if (parts[0] === "record") renderRecord(q);
+        else renderHome(q);
+        window.scrollTo(0, 0);
+      } catch (err) {
+        main.innerHTML = `<div class="alert alert--danger"><strong>Something went wrong</strong>${esc(NB.friendlyError(err))}</div>`;
+      }
+    }
+
+    (async function start() {
+      try {
+        c = await NB.loadAll();
+        m = NB.requireMe(c);
+        NB.showWho(m);
+        document.title = "neptsBI – " + m.person.name;
+        window.addEventListener("hashchange", render);
+        render();
+      } catch (err) {
+        if (err && err.message === "Not signed in") return;
+        main.innerHTML = `<div class="alert alert--danger"><strong>Can't load neptsBI</strong>${esc(NB.friendlyError(err))}</div>`;
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>
