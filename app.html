@@ -132,6 +132,48 @@
                compliance: list.length ? (list.length - overdue.length) / list.length * 100 : 100 };
     }
 
+    const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    function shortDate(iso) { const d = NB.parseDate(iso); return d.getDate() + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]; }
+
+    // Mileage section for a list of vehicles (any slice of the company)
+    function mileageSection(list, view) {
+      const baseIds = new Set(list.map(v => v.base_id));
+      const miles30 = list.reduce((s, v) => s + v.miles_30, 0);
+      const vanDays = list.reduce((s, v) => s + v.days_used_30, 0);
+      // Last 26 complete weeks
+      const weeks = new Map();
+      c.weekly.filter(w => baseIds.has(w.base_id)).forEach(w => weeks.set(w.week_start, (weeks.get(w.week_start) || 0) + w.miles));
+      const wk = [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const thisMonday = NB.isoToday(-((new Date().getDay() + 6) % 7));
+      const full = wk.filter(([d]) => d < thisMonday).slice(-26);
+      const weekData = full.map(([d, mi]) => ({ label: shortDate(d), value: mi, tip: "Week of " + shortDate(d) + ": " + fmtNum(mi) + " miles" }));
+      // Busiest days: average miles per van that day
+      const dow = DAYS.map((name, i) => {
+        const rows = c.weekday.filter(r => baseIds.has(r.base_id) && r.dow === i + 1);
+        const mi = rows.reduce((s, r) => s + r.miles, 0), vd = rows.reduce((s, r) => s + r.van_days, 0);
+        const avg = vd ? Math.round(mi / vd) : 0;
+        return { label: name, value: avg, tip: name + ": " + avg + " miles per van" };
+      });
+      return `<h2 class="section-title">Mileage</h2>
+        <div class="tiles">
+          <a class="tile tile--info" href="${link("list", { status: "all", view, sort: "miles" })}"><div class="tile__value">${fmtNum(miles30)}</div><div class="tile__label">Miles – last 30 days</div></a>
+          <div class="tile tile--info"><div class="tile__value">${vanDays ? fmtNum(Math.round(miles30 / vanDays)) : "–"}</div><div class="tile__label">Miles per van per working day</div></div>
+          <div class="tile tile--info"><div class="tile__value">${list.length ? Math.round(vanDays / list.length / 30 * 100) : 0}%</div><div class="tile__label">Van-days used (last 30 days)</div></div>
+        </div>
+        <div class="grid" style="--min: 320px; margin-top: var(--space-4)">
+          <article class="card card--plain chart-card">
+            <h3>Miles per week</h3><p class="card__desc">Last 26 weeks · ${esc(viewName(view))}</p>
+            ${NB.barChart(weekData, { ariaLabel: "Miles per week, last 26 weeks", labelEvery: 6, width: 420 })}
+            ${NB.chartTable(weekData.map(d => ["Week of " + d.label, fmtNum(d.value)]), ["Week", "Miles"])}
+          </article>
+          <article class="card card--plain chart-card">
+            <h3>Busiest days</h3><p class="card__desc">Average miles per van, last 13 weeks</p>
+            ${NB.barChart(dow, { ariaLabel: "Average miles per van by day of the week", labelEvery: 1, width: 420 })}
+            ${NB.chartTable(dow.map(d => [d.label, fmtNum(d.value)]), ["Day", "Miles per van"])}
+          </article>
+        </div>`;
+    }
+
     function numLink(n, href, tone) {
       const cls = n === 0 ? "big-num big-num--zero" : "big-num" + (tone ? " big-num--" + tone : "");
       return `<a class="${cls}" href="${href}" aria-label="${n} – show the list">${n}</a>`;
@@ -197,6 +239,8 @@
                  <td colspan="3"><span class="big-num big-num--na">Coming soon</span></td></tr>`).join("")}
           </tbody></table></div>`;
 
+      html += mileageSection(list, view);
+
       // Company / region: break down by base
       if (view === "all" || view.startsWith("r:")) {
         const regions = c.regions.filter(r => view === "all" || "r:" + r.id === view);
@@ -213,13 +257,14 @@
               <td class="num">${bk.soon ? `<a href="${link("list", { status: "due", view: bv })}">${bk.soon}</a>` : "0"}</td>
               <td class="num">${bk.notBooked ? `<a href="${link("list", { status: "notbooked", view: bv })}">${bk.notBooked}</a>` : "0"}</td>
               <td class="num">${bk.compliance.toFixed(1)}%</td>
+              <td class="num"><a href="${link("list", { status: "all", view: bv, sort: "miles" })}">${fmtNum(list.filter(v => v.base_id === b.id).reduce((s, v) => s + v.miles_30, 0))}</a></td>
             </tr>`);
           });
         });
         html += `<h2 class="section-title">By base</h2>
           <div class="table-wrap"><table class="table">
             <thead><tr><th>Region</th><th>Base</th><th class="num">Vehicles</th><th class="num">MOT overdue</th>
-              <th class="num">Due soon</th><th class="num">Not booked</th><th class="num">MOT compliant</th></tr></thead>
+              <th class="num">Due soon</th><th class="num">Not booked</th><th class="num">MOT compliant</th><th class="num">Miles (30 days)</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table></div>`;
       }
 
@@ -281,7 +326,13 @@
       const search = (q.get("find") || "").trim().toUpperCase();
       if (search) list = list.filter(v =>
         (v.registration + " " + v.fleet_number + " " + v.make + " " + v.model + " " + v.class_short).toUpperCase().includes(search));
-      list.sort((a, b) => a.days_to_due - b.days_to_due || a.registration.localeCompare(b.registration));
+      const SORTS = { due: "MOT due date", miles: "Most miles (30 days)", fewest: "Fewest miles (30 days)", reg: "Registration" };
+      const sort = SORTS[q.get("sort")] ? q.get("sort") : "due";
+      const byReg = (a, b) => a.registration.localeCompare(b.registration);
+      list.sort(sort === "miles" ? (a, b) => b.miles_30 - a.miles_30 || byReg(a, b)
+              : sort === "fewest" ? (a, b) => a.miles_30 - b.miles_30 || byReg(a, b)
+              : sort === "reg" ? byReg
+              : (a, b) => a.days_to_due - b.days_to_due || byReg(a, b));
 
       main.innerHTML = `
         <a class="back-link" href="${link("", { view })}">Back to ${esc(viewName(view))}</a>
@@ -291,6 +342,9 @@
           <div class="field"><label for="fStatus">MOT</label>
             <select id="fStatus">${Object.entries(STATUS_TITLES).map(([k, l]) =>
               `<option value="${k}"${k === status ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+          <div class="field"><label for="fSort">Sort by</label>
+            <select id="fSort">${Object.entries(SORTS).map(([k, l]) =>
+              `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></div>
           <div class="field"><label for="fFind">Find</label>
             <input id="fFind" type="search" placeholder="Reg, make, type…" value="${esc(q.get("find") || "")}"></div>
         </form>
@@ -298,10 +352,12 @@
 
       const go = () => {
         const fv = document.getElementById("fView");
+        const so = document.getElementById("fSort").value;
         location.hash = link("list", { status: document.getElementById("fStatus").value,
-          view: fv ? fv.value : view, find: document.getElementById("fFind").value.trim() });
+          view: fv ? fv.value : view, sort: so === "due" ? "" : so, find: document.getElementById("fFind").value.trim() });
       };
       document.getElementById("fStatus").addEventListener("change", go);
+      document.getElementById("fSort").addEventListener("change", go);
       const fv = document.getElementById("fView");
       if (fv) fv.addEventListener("change", go);
       let t;
@@ -316,7 +372,7 @@
       if (!list.length) return `<div class="empty">Nothing needs action – every MOT is in date and booked.</div>`;
       const canRecord = m.role.can_record;
       return `<div class="table-wrap"><table class="table">
-        <thead><tr><th>Vehicle</th>${oneBase ? "" : "<th>Base</th>"}<th>Type</th><th>Make &amp; model</th><th>MOT due</th><th>Status</th><th>Booking</th>
+        <thead><tr><th>Vehicle</th>${oneBase ? "" : "<th>Base</th>"}<th>Type</th><th>Make &amp; model</th><th>MOT due</th><th>Status</th><th>Booking</th><th class="num">Miles (30 days)</th>
           ${withActions && canRecord ? "<th><span class='visually-hidden'>Actions</span></th>" : ""}</tr></thead>
         <tbody>${list.map(v => `<tr data-href="${link("van/" + v.registration)}">
           <td><a class="reg row-link" href="${link("van/" + v.registration)}">${esc(v.registration)}</a></td>
@@ -326,6 +382,7 @@
           <td class="nums">${fmtDate(v.due_date)}<div class="small muted">${daysText(v.days_to_due)}${v.first_mot ? " · first MOT" : ""}</div></td>
           <td>${statusBadge(v.status)}</td>
           <td>${bookingBadge(v)}</td>
+          <td class="num">${fmtNum(v.miles_30)}${v.days_used_30 < 20 ? `<div class="small muted">used ${v.days_used_30} days</div>` : ""}</td>
           ${withActions && canRecord ? `<td><div class="row" style="flex-wrap:nowrap">
               ${!v.booked
                 ? `<button class="btn btn--secondary action-btn" type="button" data-book="${esc(v.registration)}">Book MOT</button>`
@@ -348,9 +405,24 @@
       const v = c.vehicleByReg.get(reg);
       if (!v) { main.innerHTML = `<a class="back-link" href="#/">Home</a><div class="empty">Vehicle ${esc(reg)} not found.</div>`; return; }
       main.innerHTML = `<p class="status-line">Loading ${esc(reg)}…</p>`;
-      const res = await NB.db.from("mot_history").select("*").eq("vehicle_id", v.id).order("test_date", { ascending: false }).order("id", { ascending: false });
+      const [res, dres] = await Promise.all([
+        NB.db.from("mot_history").select("*").eq("vehicle_id", v.id).order("test_date", { ascending: false }).order("id", { ascending: false }),
+        NB.db.from("daily_mileage").select("day,miles,odometer").eq("vehicle_id", v.id).order("day")
+      ]);
       if (res.error) throw res.error;
+      if (dres.error) throw dres.error;
       const hist = res.data;
+      // Weekly miles for this van, last 52 complete weeks
+      const wk = new Map();
+      dres.data.forEach(d => {
+        const dt = NB.parseDate(d.day); dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+        const key = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+        wk.set(key, (wk.get(key) || 0) + d.miles);
+      });
+      const thisMonday = NB.isoToday(-((new Date().getDay() + 6) % 7));
+      const vanWeeks = [...wk.entries()].filter(([k]) => k < thisMonday).sort().slice(-52)
+        .map(([k, mi]) => ({ label: shortDate(k), value: mi, tip: "Week of " + shortDate(k) + ": " + fmtNum(mi) + " miles" }));
+      const offDays = dres.data.filter(d => d.day >= NB.isoToday(-30) && d.miles === 0).length;
       const passes = hist.filter(h => h.result === "Pass" && h.mileage != null);
       let perYear = null;
       if (passes.length >= 2) {
@@ -383,10 +455,12 @@
             <div class="tile tile--${tone}"><div class="tile__value">${esc(v.status)}</div>
               <div class="tile__label">MOT ${v.status === "Overdue" ? "expired" : "due"} ${fmtDate(v.due_date)}</div>
               <div class="tile__sub">${daysText(v.days_to_due)}</div></div>
-            <div class="tile tile--info"><div class="tile__value">${fmtNum(v.last_mot_mileage)}</div>
-              <div class="tile__label">Miles at last MOT</div></div>
-            <div class="tile tile--info"><div class="tile__value">${perYear ? fmtNum(perYear) : "–"}</div>
-              <div class="tile__label">Miles a year (from MOTs)</div></div>
+            <div class="tile tile--info"><div class="tile__value">${fmtNum(v.odometer)}</div>
+              <div class="tile__label">Odometer</div><div class="tile__sub">at end of yesterday</div></div>
+            <div class="tile tile--info"><div class="tile__value">${fmtNum(v.miles_30)}</div>
+              <div class="tile__label">Miles – last 30 days</div><div class="tile__sub">${offDays ? offDays + " day" + (offDays === 1 ? "" : "s") + " not used" : "used every day"}</div></div>
+            <div class="tile tile--info"><div class="tile__value">${fmtNum(v.miles_365)}</div>
+              <div class="tile__label">Miles – last 12 months</div></div>
             <div class="tile ${lastAdvisories.length ? "tile--warn" : "tile--ok"}"><div class="tile__value">${lastAdvisories.length}</div>
               <div class="tile__label">Advisories at last MOT</div></div>
             <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Service</div></div>
@@ -394,6 +468,13 @@
             <div class="tile tile--soon"><div class="tile__value">Coming soon</div><div class="tile__label">Running cost</div></div>
           </div>
         </div>
+
+        <h2 class="section-title">Mileage</h2>
+        <article class="card card--plain chart-card">
+          <h3>Miles per week</h3><p class="card__desc">Last 52 weeks${perYear ? ` · about ${fmtNum(perYear)} miles a year from its MOTs` : ""}</p>
+          ${vanWeeks.length ? NB.barChart(vanWeeks, { ariaLabel: "Miles per week for " + v.registration, labelEvery: 6, height: 220, width: 1100 }) : `<p class="muted">No mileage recorded yet.</p>`}
+          ${vanWeeks.length ? NB.chartTable(vanWeeks.map(d => ["Week of " + d.label, fmtNum(d.value)]), ["Week", "Miles"]) : ""}
+        </article>
 
         <h2 class="section-title">MOT</h2>
         <article class="card card--${tone}">

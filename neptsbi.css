@@ -142,3 +142,25 @@ a.big-num:hover { background: var(--surface-2); text-decoration: underline; }
   display: inline-flex;
   align-items: center;
 }
+
+/* Charts (single series: brand colour; axes and grid recessive) */
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart__bar  { fill: var(--brand-text); }
+.chart__hit  { fill: transparent; cursor: pointer; }
+.chart__hit:hover { fill: var(--text); fill-opacity: 0.07; }
+.chart__grid { stroke: var(--border); stroke-width: 1; }
+.chart__base { stroke: var(--border-strong); stroke-width: 1; }
+.chart__axis { fill: var(--text-muted); font-size: 11px; font-family: var(--font); }
+.chart-tip {
+  position: absolute; z-index: 60; pointer-events: none;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow); font-size: var(--text-sm); font-weight: 650; white-space: nowrap;
+}
+.chart-tip[hidden] { display: none; }
+.chart-table { margin-top: var(--space-2); font-size: var(--text-sm); }
+.chart-table summary { cursor: pointer; color: var(--brand-text); font-weight: 600; min-height: 32px; }
+.chart-card h3 { margin-bottom: var(--space-1); }
+.chart-card .card__desc { margin-bottom: var(--space-2); }
+@media (max-width: 520px) { .big-num.big-num--na { font-size: var(--text-sm); } }

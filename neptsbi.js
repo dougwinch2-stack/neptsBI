@@ -95,6 +95,64 @@
     return msg;
   }
 
+
+  /* ---- Small bar chart (one series): SVG that scales to its box ----
+     data: [{ label, value, tip }]; labels shown every `labelEvery` bars.
+     Hover/tap a bar for its tooltip. Use with a "Show as table" toggle. */
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    var p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+  }
+  function barChart(data, opts) {
+    opts = opts || {};
+    var W = opts.width || 400, H = opts.height || 200, L = 46, B = 26, T = 8, R = 4;
+    var max = niceMax(Math.max.apply(null, data.map(function (d) { return d.value; }).concat([0])));
+    var n = data.length, slot = (W - L - R) / Math.max(n, 1), gap = 2, bw = Math.max(1, slot - gap);
+    var y = function (v) { return T + (H - T - B) * (1 - v / max); };
+    var every = opts.labelEvery || Math.ceil(n / 8);
+    var out = '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(opts.ariaLabel || "") + '">';
+    [0, 0.5, 1].forEach(function (f) {
+      var gy = y(max * f);
+      out += '<line class="chart__grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + gy + '" y2="' + gy + '"/>' +
+             '<text class="chart__axis" x="' + (L - 6) + '" y="' + (gy + 4) + '" text-anchor="end">' + fmtNum(Math.round(max * f)) + "</text>";
+    });
+    data.forEach(function (d, i) {
+      var x = L + i * slot + gap / 2, top = y(d.value), h = Math.max(0, H - B - top), r = Math.min(4, bw / 2, h);
+      if (h > 0) {
+        out += '<path class="chart__bar" d="M' + x + "," + (H - B) + "V" + (top + r) + "Q" + x + "," + top + " " + (x + r) + "," + top +
+               "H" + (x + bw - r) + "Q" + (x + bw) + "," + top + " " + (x + bw) + "," + (top + r) + "V" + (H - B) + 'Z"/>';
+      }
+      // Hit area: the whole column, easier to hover/tap than the bar itself
+      out += '<rect class="chart__hit" x="' + (L + i * slot) + '" y="' + T + '" width="' + slot + '" height="' + (H - T - B) +
+             '" data-tip="' + esc(d.tip || (d.label + ": " + fmtNum(d.value))) + '"/>';
+      if (i % every === 0) out += '<text class="chart__axis" x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(d.label) + "</text>";
+    });
+    out += '<line class="chart__base" x1="' + L + '" x2="' + (W - R) + '" y1="' + (H - B) + '" y2="' + (H - B) + '"/></svg>';
+    return out;
+  }
+  function chartTable(rows, headers) {
+    return '<details class="chart-table"><summary>Show as table</summary><div class="table-wrap"><table class="table">' +
+      "<thead><tr>" + headers.map(function (h, i) { return "<th" + (i ? ' class="num"' : "") + ">" + esc(h) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      rows.map(function (r) { return "<tr>" + r.map(function (c, i) { return "<td" + (i ? ' class="num"' : "") + ">" + esc(c) + "</td>"; }).join("") + "</tr>"; }).join("") +
+      "</tbody></table></div></details>";
+  }
+  // One shared tooltip for every chart on the page
+  var tip = null;
+  function showTip(e) {
+    var t = e.target.closest && e.target.closest("[data-tip]");
+    if (!t) { if (tip) tip.hidden = true; return; }
+    if (!tip) { tip = document.createElement("div"); tip.className = "chart-tip"; tip.setAttribute("role", "status"); document.body.appendChild(tip); }
+    tip.textContent = t.getAttribute("data-tip");
+    tip.hidden = false;
+    var x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, e.clientX - tip.offsetWidth / 2));
+    tip.style.left = x + window.scrollX + "px";
+    tip.style.top = (e.clientY + window.scrollY - tip.offsetHeight - 14) + "px";
+  }
+  document.addEventListener("pointermove", showTip);
+  document.addEventListener("pointerdown", showTip);
+  document.addEventListener("scroll", function () { if (tip) tip.hidden = true; }, { passive: true });
+
   /* ---- Data: reference tables + everyone's MOT position ---- */
   var cache = null;
 
@@ -112,7 +170,10 @@
       db.from("people").select("*").order("sort"),
       db.from("rules").select("*"),
       db.from("mot_centres").select("*").eq("active", true).order("name"),
-      db.from("vehicle_mot").select("*").order("registration")
+      db.from("vehicle_mot").select("*").order("registration"),
+      db.from("vehicle_mileage").select("*"),
+      db.from("mileage_weekly").select("*").order("week_start"),
+      db.from("mileage_weekday").select("*")
     ]);
     for (var i = 0; i < results.length; i++) if (results[i].error) throw results[i].error;
 
@@ -122,6 +183,16 @@
       rules: {}
     };
     results[4].data.forEach(function (r) { c.rules[r.key] = r; });
+    // Mileage joins onto each vehicle (zeros if a van has no readings yet)
+    var mil = new Map(results[7].data.map(function (r) { return [r.vehicle_id, r]; }));
+    c.vehicles.forEach(function (v) {
+      var r = mil.get(v.id) || {};
+      v.odometer = r.odometer == null ? null : r.odometer;
+      v.miles_7 = r.miles_7 || 0; v.miles_30 = r.miles_30 || 0; v.miles_365 = r.miles_365 || 0;
+      v.days_used_30 = r.days_used_30 || 0;
+    });
+    c.weekly = results[8].data;
+    c.weekday = results[9].data;
     c.regionById = new Map(c.regions.map(function (r) { return [r.id, r]; }));
     c.baseById = new Map(c.bases.map(function (b) { return [b.id, b]; }));
     c.roleByKey = new Map(c.roles.map(function (r) { return [r.key, r]; }));
@@ -195,7 +266,7 @@
 
   window.NB = {
     db: db, esc: esc, fmtDate: fmtDate, fmtDateTime: fmtDateTime, fmtNum: fmtNum, isoToday: isoToday,
-    parseDate: parseDate, daysText: daysText, statusBadge: statusBadge, bookingBadge: bookingBadge,
+    parseDate: parseDate, daysText: daysText, barChart: barChart, chartTable: chartTable, statusBadge: statusBadge, bookingBadge: bookingBadge,
     friendlyError: friendlyError, loadAll: loadAll, invalidate: invalidate,
     me: me, requireMe: requireMe, showWho: showWho, signOut: signOut,
     setAs: function (code) { save(AS_KEY, code); }
