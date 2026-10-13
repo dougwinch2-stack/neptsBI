@@ -1,0 +1,907 @@
+/* =====================================================================
+   dougs.css — shared stylesheet for Doug's apps
+   (Doug's Parking App, Doug's Demo, and anything that follows)
+
+   Works on phone, tablet, desktop and wallboard; follows the device's
+   light/dark setting; uses each platform's own system font.
+
+   HOW TO USE
+   1. <link rel="stylesheet" href="dougs.css"> in every page.
+   2. Optional on <html>:
+        data-theme="dark" | "light"   force a theme (default: follow device)
+        class="wallboard"             big type, scales with screen width (for TVs)
+   3. Build pages from the components below. Never hard-code a colour in
+      a page: if a new colour is needed, add a token here so every app
+      gets it.
+
+   CONTENTS
+     1  Tokens (colours, spacing, type)       7  Badges & status
+     2  Base                                  8  KPI tiles
+     3  Layout                                9  Tables
+     4  App header                           10  Alerts, empty & loading
+     5  Cards                                11  Dialog
+     6  Buttons & forms                      12  Wallboard & large screens
+   ===================================================================== */
+
+
+/* =====================================================================
+   1  TOKENS
+   Every colour pair has been contrast-checked (WCAG AA, 4.5:1 for text)
+   in both themes. "-text" tokens are for text on --surface/--bg;
+   "-fill" tokens are solid backgrounds that take --on-fill (white) text;
+   "-soft" tokens are tinted backgrounds that take the matching -text.
+   ===================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces & text — light */
+  --bg:            #eef3f6;
+  --surface:       #ffffff;
+  --surface-2:     #f4f7f9;
+  --border:        #c6d2da;
+  --border-strong: #7b8e9b;
+  --text:          #17212b;
+  --text-muted:    #4a5864;
+
+  /* Brand (deep teal) */
+  --brand-fill:    #0b4f6c;   /* header, primary buttons */
+  --brand-fill-2:  #083b51;   /* hover/pressed */
+  --brand-text:    #0b4f6c;   /* links, headings in brand colour */
+  --brand-soft:    #e1eff5;
+  --on-fill:       #ffffff;
+
+  /* Status — every status also has a word/icon, never colour alone */
+  --ok-text:       #0a6847;   --ok-fill:      #0b6e4f;   --ok-soft:      #e2f3eb;
+  --warn-text:     #7a4f00;   --warn-fill:    #8a5a00;   --warn-soft:    #fff1c7;
+  --danger-text:   #b42318;   --danger-fill:  #b42318;   --danger-soft:  #fde7e5;
+  --info-text:     #0b4f6c;   --info-fill:    #0b4f6c;   --info-soft:    #e1eff5;
+  --neutral-text:  #4a5864;   --neutral-fill: #5b6b77;   --neutral-soft: #e7ecef;
+
+  --focus:         #1a73e8;
+  --shadow:        0 1px 2px rgb(16 32 44 / 0.06), 0 2px 8px rgb(16 32 44 / 0.08);
+
+  /* Type: each platform's own UI font (San Francisco, Segoe, Roboto...) */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  --text-xs:  0.8125rem;
+  --text-sm:  0.9rem;
+  --text-md:  1rem;
+  --text-lg:  1.15rem;
+  --text-xl:  1.4rem;
+  --text-2xl: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+  --text-kpi: clamp(2rem, 1.6rem + 1.8vw, 3rem);
+
+  /* Spacing & shape */
+  --space-1: 0.25rem;  --space-2: 0.5rem;  --space-3: 0.75rem;
+  --space-4: 1rem;     --space-5: 1.5rem;  --space-6: 2rem;
+  --radius:    10px;
+  --radius-sm: 7px;
+  --touch:     48px;          /* minimum tap target */
+
+  --width-narrow: 760px;      /* forms, search lists */
+  --width-wide:   1200px;     /* dashboards */
+}
+
+/* Surfaces & text — dark (device setting, unless page forces light) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:            #11171c;
+    --surface:       #1a2229;
+    --surface-2:     #212b33;
+    --border:        #34434e;
+    --border-strong: #6d8293;
+    --text:          #edf2f5;
+    --text-muted:    #a7b4be;
+
+    --brand-fill:    #0e5d7f;
+    --brand-fill-2:  #0b4f6c;
+    --brand-text:    #6cc3e6;
+    --brand-soft:    #12303e;
+
+    --ok-text:       #4fd19a;   --ok-fill:      #0b6e4f;   --ok-soft:      #11352a;
+    --warn-text:     #f5c451;   --warn-fill:    #8a5a00;   --warn-soft:    #3a2e10;
+    --danger-text:   #ff8a80;   --danger-fill:  #b42318;   --danger-soft:  #42191a;
+    --info-text:     #6cc3e6;   --info-fill:    #0e5d7f;   --info-soft:    #12303e;
+    --neutral-text:  #a7b4be;   --neutral-fill: #4d5d69;   --neutral-soft: #26313a;
+
+    --focus:         #8ab4f8;
+    --shadow:        0 1px 2px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* Same dark values, when a page forces dark (e.g. a wallboard) */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:            #11171c;
+  --surface:       #1a2229;
+  --surface-2:     #212b33;
+  --border:        #34434e;
+  --border-strong: #6d8293;
+  --text:          #edf2f5;
+  --text-muted:    #a7b4be;
+
+  --brand-fill:    #0e5d7f;
+  --brand-fill-2:  #0b4f6c;
+  --brand-text:    #6cc3e6;
+  --brand-soft:    #12303e;
+
+  --ok-text:       #4fd19a;   --ok-fill:      #0b6e4f;   --ok-soft:      #11352a;
+  --warn-text:     #f5c451;   --warn-fill:    #8a5a00;   --warn-soft:    #3a2e10;
+  --danger-text:   #ff8a80;   --danger-fill:  #b42318;   --danger-soft:  #42191a;
+  --info-text:     #6cc3e6;   --info-fill:    #0e5d7f;   --info-soft:    #12303e;
+  --neutral-text:  #a7b4be;   --neutral-fill: #4d5d69;   --neutral-soft: #26313a;
+
+  --focus:         #8ab4f8;
+  --shadow:        0 1px 2px rgb(0 0 0 / 0.4);
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+
+
+/* =====================================================================
+   2  BASE
+   ===================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { line-height: 1.25; margin: 0 0 var(--space-3); }
+h1 { font-size: var(--text-2xl); font-weight: 700; }
+h2 { font-size: var(--text-xl);  font-weight: 700; }
+h3 { font-size: var(--text-lg);  font-weight: 650; }
+p  { margin: 0 0 var(--space-3); }
+
+a { color: var(--brand-text); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+img, svg { max-width: 100%; height: auto; }
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.muted   { color: var(--text-muted); }
+.small   { font-size: var(--text-sm); }
+.nums    { font-variant-numeric: tabular-nums; }
+.mono    { font-family: var(--font-mono); }
+.reg     { font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }  /* vehicle registrations */
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+
+/* =====================================================================
+   3  LAYOUT
+   ===================================================================== */
+
+.container {
+  width: 100%;
+  max-width: var(--width-narrow);
+  margin-inline: auto;
+  padding: var(--space-4)
+           max(var(--space-4), env(safe-area-inset-right))
+           var(--space-6)
+           max(var(--space-4), env(safe-area-inset-left));
+}
+.container--wide { max-width: var(--width-wide); }
+.container--full { max-width: none; }
+
+.stack       { display: grid; gap: var(--space-3); }
+.stack--lg   { gap: var(--space-5); }
+.row         { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.row--between{ justify-content: space-between; }
+
+/* Auto-fitting grid: as many columns as fit, never narrower than --min */
+.grid {
+  --min: 260px;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--min), 100%), 1fr));
+}
+
+.section-title {
+  margin: var(--space-5) 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+
+/* =====================================================================
+   4  APP HEADER
+   <header class="app-header">
+     <div class="app-header__inner">
+       <a class="app-header__title" href="index.html">Doug's Parking App</a>
+       <p class="app-header__subtitle">Find a ward...</p>
+       <nav class="app-header__nav">...links...</nav>
+     </div>
+   </header>
+   ===================================================================== */
+
+.app-header {
+  background: var(--brand-fill);
+  color: var(--on-fill);
+  padding-top: env(safe-area-inset-top);
+}
+
+.app-header__inner {
+  max-width: var(--width-wide);
+  margin-inline: auto;
+  padding: var(--space-4) max(var(--space-4), env(safe-area-inset-right))
+           var(--space-4) max(var(--space-4), env(safe-area-inset-left));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+}
+
+.app-header__title {
+  color: inherit;
+  text-decoration: none;
+  font-size: var(--text-xl);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  margin-right: auto;
+}
+
+.app-header__subtitle {
+  flex-basis: 100%;
+  order: 4;
+  margin: 0;
+  font-size: var(--text-sm);
+  opacity: 0.9;
+}
+
+.app-header__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  order: 3;                 /* phones: own row under the title */
+  flex-basis: 100%;
+}
+
+@media (min-width: 700px) {  /* wider screens: title · nav · ⋮ on one row */
+  .app-header__nav { order: 1; flex-basis: auto; }
+}
+
+/* ---- ⋮ settings menu (built by dougs.js) ---- */
+.settings {
+  position: relative;
+  order: 2;
+}
+
+.settings__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--on-fill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings__button:hover,
+.settings__button[aria-expanded="true"] { background: rgb(255 255 255 / 0.16); }
+.settings__button:focus-visible { outline-color: #ffffff; border-radius: 50%; }
+
+.settings__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 50;
+  width: max-content;
+  min-width: 260px;
+  max-width: calc(100vw - 2 * var(--space-4));
+  padding: 0;
+  display: grid;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+}
+.settings__panel[hidden] { display: none; }
+
+.settings__group { display: grid; gap: var(--space-2); }
+.settings__label { font-size: var(--text-sm); font-weight: 700; }
+.settings__hint  { font-size: var(--text-xs); color: var(--text-muted); margin-top: calc(-1 * var(--space-2)); }
+.settings__check { min-height: 40px; }
+
+/* Menu rows: Theme ›, Wallboard size, Admin › */
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 var(--space-4);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border);
+  color: var(--brand-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.settings__row:first-child { border-top: 0; }
+.settings__row:hover { background: var(--surface-2); }
+a.settings__row::after,
+button.settings__row::after {            /* chevron drawn with borders, so it turns cleanly */
+  content: "";
+  flex: none;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.15em;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+}
+a.settings__row::after { margin-left: auto; }
+button.settings__row[aria-expanded="true"]::after { transform: rotate(45deg); }
+.settings__value { margin-left: auto; color: var(--text-muted); font-weight: 500; }
+.settings__check-row input { margin-left: auto; width: 22px; height: 22px; accent-color: var(--brand-fill); }
+.settings__options { padding: 0 0 var(--space-1); }
+
+/* Theme choices: plain text rows, tick on the one in use */
+.settings__choice {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-4) 0 calc(var(--space-4) + var(--space-4));
+  background: none;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings__choice:hover { background: var(--surface-2); }
+.settings__choice[aria-checked="true"] { color: var(--brand-text); font-weight: 600; }
+.settings__choice[aria-checked="true"]::after { content: "✓"; margin-left: auto; font-weight: 700; }
+.settings__options[hidden] { display: none; }
+
+/* Segmented control: a row of joined toggle buttons */
+.segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.segmented button {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-left: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--brand-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+.segmented button:first-child { border-left: 0; }
+.segmented button:hover { background: var(--surface-2); }
+.segmented button[aria-pressed="true"] { background: var(--brand-fill); color: var(--on-fill); }
+.segmented button:focus-visible { outline-offset: -3px; }
+
+.app-header__nav a {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-header__nav a:hover,
+.app-header__nav a[aria-current="page"] {
+  background: rgb(255 255 255 / 0.16);
+}
+
+.app-header__nav a:focus-visible { outline-color: #ffffff; }
+
+/* Back link for sub-pages: <a class="back-link" href="index.html">Back</a> */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch);
+  color: var(--brand-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.back-link::before { content: "\2190"; font-size: 1.2em; }
+
+
+/* =====================================================================
+   5  CARDS
+   <article class="card card--danger"> ... </article>
+   Status modifier adds a coloured left edge: --ok --warn --danger --info
+   ===================================================================== */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--brand-fill);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.card--plain   { border-left-width: 1px; border-left-color: var(--border); }
+.card--ok      { border-left-color: var(--ok-text); }
+.card--warn    { border-left-color: var(--warn-text); }
+.card--danger  { border-left-color: var(--danger-text); }
+.card--info    { border-left-color: var(--info-text); }
+
+.card__eyebrow {
+  color: var(--brand-text);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.card__title {
+  margin: var(--space-1) 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.card__body {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+}
+
+.card__body dt { font-weight: 700; display: inline; }
+.card__body dd { display: inline; margin: 0; }
+
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.card__actions > .btn { flex: 1 1 140px; }
+
+
+/* =====================================================================
+   6  BUTTONS & FORMS
+   ===================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn--primary   { background: var(--brand-fill);  color: var(--on-fill); }
+.btn--primary:hover { background: var(--brand-fill-2); }
+.btn--go        { background: var(--ok-fill);     color: var(--on-fill); }       /* Navigate, Save */
+.btn--go:hover  { filter: brightness(0.92); }
+.btn--danger    { background: var(--danger-fill); color: var(--on-fill); }
+.btn--secondary { background: var(--brand-soft);  color: var(--brand-text); border-color: var(--border); }
+.btn--secondary:hover { border-color: var(--border-strong); }
+.btn--ghost     { background: transparent;        color: var(--brand-text); border-color: var(--border-strong); }
+.btn--ghost:hover { background: var(--surface-2); }
+.btn--block     { width: 100%; }
+
+/* Toggle buttons (e.g. a filter or view switch): <button class="btn btn--ghost" aria-pressed="true"> */
+.btn[aria-pressed="true"] {
+  background: var(--brand-fill);
+  color: var(--on-fill);
+  border-color: var(--brand-fill);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+  border-color: var(--border);
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* Fields
+   <div class="field">
+     <label for="x">Label</label>
+     <input id="x" aria-describedby="x-hint">
+     <div class="field__hint" id="x-hint">Help text</div>
+     <div class="field__error">Message</div>
+   </div>                                                           */
+
+.field { display: grid; gap: var(--space-1); min-width: 0; }
+
+.field > label,
+.label {
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+
+.field__hint  { color: var(--text-muted); font-size: var(--text-sm); }
+.field__error { color: var(--danger-text); font-size: var(--text-sm); font-weight: 600; }
+.field__error:empty { display: none; }
+
+.input,
+.field input:not([type="checkbox"]):not([type="radio"]),
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: max(16px, 1rem);   /* 16px+ stops iPhones zooming in on focus */
+}
+
+.field textarea { min-height: 110px; resize: vertical; }
+
+.field input::placeholder,
+.field textarea::placeholder { color: var(--text-muted); opacity: 1; }
+
+.field [aria-invalid="true"] { border-color: var(--danger-text); border-width: 2px; }
+
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch);
+  font-weight: 600;
+}
+.check input { width: 22px; height: 22px; accent-color: var(--brand-fill); }
+
+/* Two or three fields side by side on wider screens, stacked on phones */
+.field-row {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+}
+
+.form-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Search box with a results dropdown
+   <div class="search"> <input ...> <div class="search__results" role="listbox">
+       <div class="search__item" role="option" aria-selected="true">...</div>  */
+.search { position: relative; }
+
+.search__results {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.search__results:empty { display: none; }
+
+.search__item {
+  padding: var(--space-3);
+  min-height: var(--touch);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.search__item:last-child { border-bottom: 0; }
+.search__item:hover,
+.search__item[aria-selected="true"] { background: var(--brand-soft); }
+
+
+/* =====================================================================
+   7  BADGES & STATUS
+   <span class="badge badge--danger">Overdue</span>
+   Always include a word. The dot gives a shape cue for colour-blind users.
+   ===================================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.2em 0.65em;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge--ok      { color: var(--ok-text);      background: var(--ok-soft); }
+.badge--warn    { color: var(--warn-text);    background: var(--warn-soft); }
+.badge--danger  { color: var(--danger-text);  background: var(--danger-soft); }
+.badge--info    { color: var(--info-text);    background: var(--info-soft); }
+.badge--neutral { color: var(--neutral-text); background: var(--neutral-soft); }
+
+.badge--warn::before   { border-radius: 1px; transform: rotate(45deg); }  /* diamond */
+.badge--danger::before { border-radius: 1px; }                           /* square  */
+
+/* Plain coloured text for inline status */
+.text-ok     { color: var(--ok-text); }
+.text-warn   { color: var(--warn-text); }
+.text-danger { color: var(--danger-text); }
+
+
+/* =====================================================================
+   8  KPI TILES (dashboards, wallboards)
+   <div class="tile tile--danger">
+     <div class="tile__value">7</div>
+     <div class="tile__label">MOT overdue</div>
+   </div>
+   ===================================================================== */
+
+.tiles {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.tile__value {
+  font-size: var(--text-kpi);
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.tile--ok     { border-top-color: var(--ok-text); }
+.tile--ok     .tile__value { color: var(--ok-text); }
+.tile--warn   { border-top-color: var(--warn-text); }
+.tile--warn   .tile__value { color: var(--warn-text); }
+.tile--danger { border-top-color: var(--danger-text); }
+.tile--danger .tile__value { color: var(--danger-text); }
+.tile--info   { border-top-color: var(--info-text); }
+.tile--info   .tile__value { color: var(--info-text); }
+
+a.tile { display: block; color: inherit; text-decoration: none; }
+a.tile:hover { border-color: var(--border-strong); }
+
+
+/* =====================================================================
+   9  TABLES
+   Wrap in .table-wrap so wide tables scroll sideways on phones
+   instead of breaking the page.
+   ===================================================================== */
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: var(--space-3);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+
+.table th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover td { background: var(--surface-2); }
+.table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+
+/* =====================================================================
+   10  ALERTS, EMPTY & LOADING
+   ===================================================================== */
+
+.alert {
+  border: 1px solid currentColor;
+  border-left-width: 5px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+}
+.alert > :last-child { margin-bottom: 0; }
+.alert strong { display: block; margin-bottom: var(--space-1); }
+.alert, .alert--info { color: var(--info-text);   background: var(--info-soft); }
+.alert--ok           { color: var(--ok-text);     background: var(--ok-soft); }
+.alert--warn         { color: var(--warn-text);   background: var(--warn-soft); }
+.alert--danger       { color: var(--danger-text); background: var(--danger-soft); }
+
+.empty {
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.status-line {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.status-line--error { color: var(--danger-text); font-weight: 600; }
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+  min-height: 1em;
+}
+@keyframes skeleton { to { background-position: -200% 0; } }
+
+
+/* =====================================================================
+   11  DIALOG — use the native <dialog> element
+   <dialog class="dialog"> <h2>Title</h2> <p>...</p> <div class="row">buttons</div> </dialog>
+   dialog.showModal() / dialog.close()
+   ===================================================================== */
+
+.dialog {
+  width: min(440px, calc(100% - 2 * var(--space-4)));
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.35);
+}
+.dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+
+
+/* =====================================================================
+   12  WALLBOARD & LARGE SCREENS
+   ===================================================================== */
+
+/* Big desktop monitors: nudge everything up a little */
+@media (min-width: 1600px) {
+  html { font-size: 112.5%; }
+}
+
+/* <html class="wallboard">: type scales with screen width so it reads
+   across a room. ~22px base on a 1080p TV, ~40px on 4K. */
+html.wallboard {
+  font-size: clamp(16px, 1.15vw, 40px);
+}
+
+.wallboard body { overflow-x: hidden; }
+
+.wallboard .container { max-width: none; padding-inline: 2.5vw; }
+
+.wallboard .app-header__inner { max-width: none; padding-inline: 2.5vw; }
+
+.wallboard .tiles { grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+
+.wallboard .table { font-size: var(--text-md); }
+
+.wallboard .table td,
+.wallboard .table th { padding: var(--space-2) var(--space-3); }
+
+.wallboard .table tbody tr:hover td { background: transparent; }   /* no hover on TVs */
+
+/* Clock / "last updated" line for wallboards */
+.updated {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* =====================================================================
+   PRINT — clean black-on-white
+   ===================================================================== */
+
+@media print {
+  :root { --bg: #fff; --surface: #fff; --shadow: none; }
+  .app-header { background: none; color: #000; border-bottom: 2px solid #000; }
+  .btn, .app-header__nav, .search__results { display: none !important; }
+  .card, .tile { break-inside: avoid; }
+}

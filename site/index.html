@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>neptsBI – Sign in</title>
+  <meta name="description" content="neptsBI demo: fleet and base information for a patient transport service.">
+  <link rel="stylesheet" href="dougs.css">
+  <link rel="stylesheet" href="neptsbi.css">
+  <script src="dougs.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="neptsbi.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__inner">
+      <a class="app-header__title logo" href="index.html">nepts<span class="logo__bi">BI</span></a>
+      <p class="app-header__subtitle">Fleet &amp; base information <span class="demo-flag">DEMO</span></p>
+    </div>
+  </header>
+
+  <main class="container container--wide">
+    <h1>Sign in</h1>
+    <p class="muted">Choose who you are. Each person sees the company from their own point of view.
+      All people, vehicles and records here are made up.</p>
+
+    <p id="status" class="status-line">Loading…</p>
+
+    <div id="tiles" class="grid" style="--min: 240px"></div>
+
+    <h2 class="section-title">Someone else</h2>
+    <form id="otherForm" class="form-panel" style="max-width: var(--width-narrow)">
+      <div class="field">
+        <label for="otherPerson">Sign in as</label>
+        <select id="otherPerson"></select>
+      </div>
+      <div><button class="btn btn--primary" type="submit">Sign in</button></div>
+    </form>
+  </main>
+
+  <script>
+    (async function () {
+      const statusEl = document.getElementById("status");
+      const tilesEl = document.getElementById("tiles");
+      const select = document.getElementById("otherPerson");
+      const esc = NB.esc;
+
+      function go(code) {
+        NB.setAs(code);
+        location.href = "app.html";
+      }
+
+      try {
+        const c = await NB.loadAll();
+        statusEl.hidden = true;
+
+        const featured = c.people.filter(p => p.featured);
+        tilesEl.innerHTML = featured.map(p => {
+          const role = c.roleByKey.get(p.role_key);
+          const where = p.base_id ? c.baseById.get(p.base_id).name
+                      : p.region_id ? c.regionById.get(p.region_id).name : "Whole company";
+          if (!role.available) {
+            return `<div class="card" aria-disabled="true">
+                <div class="card__eyebrow">${esc(role.label)}</div>
+                <div class="card__title">${esc(p.name)}</div>
+                <p class="card__desc">${esc(role.description)}</p>
+                <p class="card__desc"><span class="badge badge--neutral">Coming soon</span></p>
+              </div>`;
+          }
+          return `<button class="card" type="button" data-code="${esc(p.code)}">
+              <div class="card__eyebrow">${esc(role.label)} · ${esc(where)}</div>
+              <div class="card__title">${esc(p.name)}</div>
+              <p class="card__desc">${esc(role.description)}</p>
+            </button>`;
+        }).join("");
+
+        tilesEl.addEventListener("click", e => {
+          const b = e.target.closest("button[data-code]");
+          if (b) go(b.dataset.code);
+        });
+
+        // Everyone, grouped by role
+        select.innerHTML = c.roles.filter(r => r.available).map(r => {
+          const people = c.people.filter(p => p.role_key === r.key);
+          if (!people.length) return "";
+          return `<optgroup label="${esc(r.label)}">` +
+            people.map(p => `<option value="${esc(p.code)}">${esc(p.name)}</option>`).join("") +
+            `</optgroup>`;
+        }).join("");
+
+        document.getElementById("otherForm").addEventListener("submit", e => {
+          e.preventDefault();
+          if (select.value) go(select.value);
+        });
+      } catch (err) {
+        statusEl.textContent = NB.friendlyError(err);
+        statusEl.classList.add("status-line--error");
+      }
+    })();
+  </script>
+</body>
+</html>
