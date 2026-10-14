@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=18 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=18">
-  <link rel="stylesheet" href="neptsbi.css?v=18">
-  <script src="dougs.js?v=18"></script>
+  <!-- ?v=19 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=19">
+  <link rel="stylesheet" href="neptsbi.css?v=19">
+  <script src="dougs.js?v=19"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=18"></script>
+  <script src="neptsbi.js?v=19"></script>
 </head>
 <body>
   <header class="app-header">
@@ -210,24 +210,30 @@
         const dueCell = it => {
           const d = dueOf(it), late = d < today();
           // Off the road although the date hasn't come yet (not logged, failed): say why – unless the Status column does
-          if (it.kind === "overdue" && !late) return fCheck ? shortDate(d) : `<span class="text-danger">${shortWhy(it.v, it.check)}</span>`;
+          if (it.kind === "overdue" && !late) return shortDate(d);   // the Status column says why (not logged, failed)
           return `<span class="${it.kind === "overdue" ? "text-danger" : ""}">${shortDate(d)}</span>`;
         };
         const status = it => {
           const s = S(it.v, it.check);
           if (s.awaiting_result) return `<span class="text-danger">Not logged</span>`;
           if (it.check === "mot" && it.v.last_test_result === "Fail" && !s.booked) return `<span class="text-danger">Failed</span>`;
-          return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="text-danger">Not booked</span>`;
+          return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="${it.kind === "overdue" ? "text-danger" : "text-warn"}">Not booked</span>`;
         };
-        const label = fCheck ? CHECK_NAME[fCheck] : "";
-        html += items.length ? `<div class="ph-list" style="margin-top:var(--space-4)"><table>
-            <thead><tr><th>Reg</th>${fCheck ? `<th>${label} due</th><th>Status</th>` : `<th>Check</th><th>Due</th>`}</tr></thead>
-            <tbody>${items.map(it => `<tr data-open="${esc(it.v.registration)}" data-check="${it.check}" tabindex="0">
+        // One list per check, so people can look, prioritise and act on one thing at a time
+        const checks = CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).map(ch => ch.key);
+        const tables = checks.map(ck => {
+          const rows = items.filter(it => it.check === ck);
+          if (!rows.length) return "";
+          return `${fCheck ? "" : `<h2 class="ph-list-title">${CHECK_NAME[ck]} <span class="muted">(${rows.length})</span></h2>`}
+            <div class="ph-list"${fCheck ? ' style="margin-top:var(--space-4)"' : ""}><table>
+            <thead><tr><th>Reg</th><th>${CHECK_NAME[ck]} due</th><th>Status</th></tr></thead>
+            <tbody>${rows.map(it => `<tr data-open="${esc(it.v.registration)}" data-check="${it.check}" tabindex="0">
               <td><span class="reg">${esc(it.v.registration)}</span>${oneBase ? "" : `<div class="small muted">${esc(it.v.base_name)}</div>`}</td>
-              ${fCheck ? `<td>${dueCell(it)}</td><td>${status(it)}</td>` : `<td>${CHECK_NAME[it.check]}</td><td>${dueCell(it)}</td>`}
+              <td>${dueCell(it)}</td><td>${status(it)}</td>
             </tr>`).join("")}</tbody>
-          </table></div>`
-          : `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
+          </table></div>`;
+        }).join("");
+        html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
       } else {
         // Regional / operations, nothing narrowed: one line per base, worst first
         const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
