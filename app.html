@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=19 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=19">
-  <link rel="stylesheet" href="neptsbi.css?v=19">
-  <script src="dougs.js?v=19"></script>
+  <!-- ?v=20 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=20">
+  <link rel="stylesheet" href="neptsbi.css?v=20">
+  <script src="dougs.js?v=20"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=19"></script>
+  <script src="neptsbi.js?v=20"></script>
 </head>
 <body>
   <header class="app-header">
@@ -219,19 +219,24 @@
           if (it.check === "mot" && it.v.last_test_result === "Fail" && !s.booked) return `<span class="text-danger">Failed</span>`;
           return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="${it.kind === "overdue" ? "text-danger" : "text-warn"}">Not booked</span>`;
         };
-        // One list per check, so people can look, prioritise and act on one thing at a time
+        // One list per check, so people can look, prioritise and act on one thing at a time.
+        // Narrowed to one check: Overdue and Pending as two tables (like the Power BI page) – overdue is the work.
         const checks = CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).map(ch => ch.key);
-        const tables = checks.map(ck => {
-          const rows = items.filter(it => it.check === ck);
-          if (!rows.length) return "";
-          return `${fCheck ? "" : `<h2 class="ph-list-title">${CHECK_NAME[ck]} <span class="muted">(${rows.length})</span></h2>`}
-            <div class="ph-list"${fCheck ? ' style="margin-top:var(--space-4)"' : ""}><table>
-            <thead><tr><th>Reg</th><th>${CHECK_NAME[ck]} due</th><th>Status</th></tr></thead>
+        const table = (rows, ck, withStatus) => `<div class="ph-list"><table>
+            <thead><tr><th>Reg</th><th>${CHECK_NAME[ck]} due</th>${withStatus ? "<th>Status</th>" : ""}</tr></thead>
             <tbody>${rows.map(it => `<tr data-open="${esc(it.v.registration)}" data-check="${it.check}" tabindex="0">
               <td><span class="reg">${esc(it.v.registration)}</span>${oneBase ? "" : `<div class="small muted">${esc(it.v.base_name)}</div>`}</td>
-              <td>${dueCell(it)}</td><td>${status(it)}</td>
+              <td>${dueCell(it)}</td>${withStatus ? `<td>${status(it)}</td>` : ""}
             </tr>`).join("")}</tbody>
           </table></div>`;
+        const tables = checks.map(ck => {
+          const rows = items.filter(it => it.check === ck);
+          if (!fCheck) return rows.length ? `<h2 class="ph-list-title">${CHECK_NAME[ck]} <span class="muted">(${rows.length})</span></h2>${table(rows, ck, true)}` : "";
+          return ["overdue", "soon"].filter(k => !fKind || k === fKind).map(k => {
+            const part = rows.filter(it => it.kind === k);
+            return `<h2 class="ph-list-title">${k === "overdue" ? "Overdue" : "Pending"} <span class="muted">(${part.length})</span></h2>` +
+              (part.length ? table(part, ck, k === "overdue") : `<p class="muted" style="margin:0">None.</p>`);
+          }).join("");
         }).join("");
         html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
       } else {
