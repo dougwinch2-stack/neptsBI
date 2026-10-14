@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=32 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=32">
-  <link rel="stylesheet" href="neptsbi.css?v=32">
-  <script src="dougs.js?v=32"></script>
+  <!-- ?v=33 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=33">
+  <link rel="stylesheet" href="neptsbi.css?v=33">
+  <script src="dougs.js?v=33"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=32"></script>
+  <script src="neptsbi.js?v=33"></script>
 </head>
 <body>
   <header class="app-header">
@@ -43,17 +43,20 @@
     const CHECKS = [   // rows of the check grid, in a fixed order, grouped
       { key: "mot", label: "MOT", live: true, group: "Vehicle" },
       { key: "service", label: "Service", live: true, group: "Vehicle" },
-      { key: "clean", label: "Deep clean", group: "Vehicle" },
-      { key: "oxygen", label: "Oxygen", group: "Vehicle" },
-      { key: "defib", label: "Defib", group: "Vehicle", live: true, equip: true },
-      { key: "fire", label: "Fire extinguisher", group: "Base", live: true, equip: true }
+      { key: "clean", label: "Deep clean", group: "Vehicle", live: true, need: "hasClean" },
+      { key: "oxygen", label: "Oxygen", group: "Vehicle", live: true, equip: true, need: "hasEquipment" },
+      { key: "defib", label: "Defib", group: "Vehicle", live: true, equip: true, need: "hasEquipment" },
+      { key: "fire", label: "Fire extinguisher", group: "Base", live: true, equip: true, need: "hasEquipment" }
     ];
-    const CHECK_NAME = { mot: "MOT", service: "Service", defib: "Defib", fire: "Fire extinguisher" };
+    const CHECK_NAME = { mot: "MOT", service: "Service", clean: "Deep clean", oxygen: "Oxygen", defib: "Defib", fire: "Fire extinguisher" };
+    // Checks whose data isn't in the database yet (SQL file not run) are left out
+    const useChecks = () => CHECKS.forEach(ch => { if (ch.need && !c[ch.need]) ch.live = false; });
 
     // The status object for one check on one vehicle (MOT lives on the vehicle, service on v.svc)
     const S = (v, check) => check === "service" ? v.svc
       : check === "mot" ? v
-      : (v.eq && v.eq[check]) || { status: "OK", booked: false, items: 0 };   // fire / defib
+      : check === "clean" ? v.clean
+      : (v.eq && v.eq[check]) || { status: "OK", booked: false, items: 0 };   // fire / defib / oxygen
 
     /* ---------------- helpers ---------------- */
 
@@ -232,6 +235,7 @@
           const s = S(it.v, it.check);
           if (s.awaiting_result) return `<span class="text-danger">${it.check === "mot" && dvsaPeek(it.v) ? "DVSA – confirm" : "Not logged"}</span>`;
           if (it.check === "mot" && it.v.last_test_result === "Fail" && !s.booked) return `<span class="text-danger">Failed</span>`;
+          if (it.check === "oxygen") return `<span class="text-danger">Swap ${esc(cyl(s.overdue_positions))}</span>`;
           return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="${it.kind === "overdue" ? "text-danger" : "text-warn"}">Not booked</span>`;
         };
         // One list per check, so people can look, prioritise and act on one thing at a time.
@@ -307,7 +311,11 @@
         const d = NB.daysBetween(today(), s.effective_due_date);
         return d < 0 ? `${-d} day${d === -1 ? "" : "s"} over` : `Due ${shortDate(s.effective_due_date)}`;
       }
-      if (check !== "mot") {                                   // fire / defib
+      if (check === "clean") {
+        const d = s.days_to_due;
+        return d < 0 ? `${-d} day${d === -1 ? "" : "s"} over` : `Due ${shortDate(s.due_date)}`;
+      }
+      if (check !== "mot") {                                   // fire / defib / oxygen
         const d = s.days_to_due;
         const part = s.items > 1 && s.items_overdue && s.items_overdue < s.items ? ` (${s.items_overdue} of ${s.items})` : "";
         return (d < 0 ? `Expired ${-d === 1 ? "1 day" : -d + " days"}` : `Due ${shortDate(s.due_date)}`) + part;
@@ -351,9 +359,28 @@
 
     // The admin panel for one van: the details and the thing to do. With a check, just that check;
     // without (from search), MOT and service one under the other.
+    const cyl = t => (t || "").replace(/ \(stretcher\)/g, " on stretcher");   // oxygen cylinder positions, for reading
     function vanSection(v, check) {
       const s = S(v, check), isSvc = check === "service", reg = esc(v.registration);
       const row = (k, val) => `<dt>${k}</dt><dd>${val}</dd>`;
+      const inDate = s => s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date${s.items > 1 ? ` (${s.items_overdue} of ${s.items})` : ""}</span>`
+        : s.status === "Due soon" ? `<span class="text-warn" style="font-weight:700">Due soon</span>` : '<span class="text-ok" style="font-weight:700">In date</span>';
+      if (check === "clean") {
+        return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">` +
+          row("Status", s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Overdue</span>` : s.status === "Due soon" ? `<span class="text-warn" style="font-weight:700">Due soon</span>` : '<span class="text-ok" style="font-weight:700">Done</span>') +
+          row("Last deep clean", NB.fmtDay(s.last_check)) +
+          row("Due", `${NB.fmtDay(s.due_date)} <span class="muted">(every ${s.weeks} weeks)</span>`) +
+          row("Contractor's next visit", NB.fmtDay(s.booking_date) + (s.booked ? "" : ' <span class="text-warn">– after it\'s due</span>')) +
+          `</dl>`, action: "" };
+      }
+      if (check === "oxygen") {
+        if (!s.items) return { facts: `<p class="muted">No oxygen on this van.</p>`, action: "" };
+        return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">` +
+          row("On board", esc(cyl(s.positions))) +
+          row("Status", s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date – ${esc(cyl(s.overdue_positions))}</span>` : inDate(s)) +
+          row(s.status === "Overdue" ? "Ran out" : "First to run out", NB.fmtDay(s.due_date)) +
+          `</dl>`, action: "" };
+      }
       if (check === "fire" || check === "defib") {
         if (!s.items) return { facts: `<p class="muted">No ${CHECK_NAME[check].toLowerCase()} recorded for this van.</p>`, action: "" };
         const word = check === "fire" ? (s.items === 1 ? "1 extinguisher" : s.items + " extinguishers") : "1 defib";
@@ -670,7 +697,7 @@
         const sa = a.svc, sb = b.svc;
         return (sa.effective_due_date || "").localeCompare(sb.effective_due_date || "") || a.registration.localeCompare(b.registration);
       }
-      return a.days_to_due - b.days_to_due || a.registration.localeCompare(b.registration);
+      return S(a, check).days_to_due - S(b, check).days_to_due || a.registration.localeCompare(b.registration);
     }
 
     function renderList(q) {
@@ -1631,7 +1658,7 @@
     }
     /* ---------------- router ---------------- */
 
-    async function reload() { NB.invalidate(); c = await NB.loadAll(); passesByVan = null; }
+    async function reload() { NB.invalidate(); c = await NB.loadAll(); useChecks(); passesByVan = null; }
 
     async function render() {
       try {
@@ -1653,7 +1680,7 @@
 
     (async function start() {
       try {
-        c = await NB.loadAll();
+        c = await NB.loadAll(); useChecks();
         m = NB.requireMe(c);
         NB.showWho(m);
         if (m.role.can_record) document.querySelector('[data-nav="work"]').hidden = false;

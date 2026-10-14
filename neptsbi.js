@@ -180,9 +180,11 @@
       // Passes only (for the compliance trend); far fewer than the 1,000-row limit
       db.from("mot_tests").select("vehicle_id,test_date,expiry_date").eq("result", "Pass"),
       // Fire extinguishers and defibs (08_equipment.sql) – optional, so the app still works before it's run
-      db.from("vehicle_equipment").select("*")
+      db.from("vehicle_equipment").select("*"),
+      // Deep cleans (09_cleans_oxygen.sql) – optional too
+      db.from("vehicle_clean").select("*")
     ]);
-    for (var i = 0; i < results.length - 1; i++) if (results[i].error) throw results[i].error;
+    for (var i = 0; i < results.length - 2; i++) if (results[i].error) throw results[i].error;
 
     var c = {
       regions: results[0].data, bases: results[1].data, roles: results[2].data,
@@ -203,7 +205,7 @@
     c.vehicles.forEach(function (v) { v.svc = svc.get(v.id) || { status: "OK", booked: false }; });
     c.providers = results[11].data;
     c.passes = results[12].data;
-    // Equipment position joins onto each vehicle as v.eq.fire / v.eq.defib
+    // Equipment position joins onto each vehicle as v.eq.fire / v.eq.defib / v.eq.oxygen
     var eq = new Map();
     (results[13].error ? [] : results[13].data).forEach(function (r) {
       if (!eq.has(r.vehicle_id)) eq.set(r.vehicle_id, {});
@@ -211,6 +213,10 @@
     });
     c.hasEquipment = !results[13].error;
     c.vehicles.forEach(function (v) { v.eq = eq.get(v.id) || {}; });
+    // Deep clean position joins onto each vehicle as v.clean
+    var cl = new Map((results[14].error ? [] : results[14].data).map(function (r) { return [r.vehicle_id, r]; }));
+    c.hasClean = !results[14].error;
+    c.vehicles.forEach(function (v) { v.clean = cl.get(v.id) || { status: "OK", booked: false }; });
     c.weekly = results[8].data;
     c.weekday = results[9].data;
     c.regionById = new Map(c.regions.map(function (r) { return [r.id, r]; }));
