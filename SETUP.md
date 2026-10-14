@@ -4,14 +4,21 @@ Uses the same Supabase project as the parking app, in its own separate area ("ne
 so the parking app isn't touched. About 10 minutes.
 
 ## 1. Load the database (Supabase → SQL Editor)
-Run these three files **in order**: open each one, copy everything, paste it into
+Run these files **in order**: open each one, copy everything, paste it into
 **SQL Editor → New query**, then click **Run**.
 
 1. `sql/01_schema.sql`: creates the tables
 2. `sql/02_demo_data.sql`: the demo vans, MOT history and people
 3. `sql/03_nightly_reset.sql`: the 2:30am reset
+4. `sql/04_mileage.sql`: daily mileage (two years)
+5. `sql/05_servicing.sql`: services and service bookings
+6. `sql/06_work.sql`: results waiting to be logged
+7. `sql/07_vor.sql`: the VOR (vehicle off road) rule
+8. `sql/08_equipment.sql`: fire extinguishers, defibs and the demo story switch
+9. `sql/09_cleans_oxygen.sql`: deep cleans and oxygen cylinders
 
 Each should say "Success. No rows returned" (03 shows a number, which is fine).
+Files 08 and 09 are safe to run again.
 
 ## 2. Switch the new area on for the app (one-off)
 Supabase → **Project Settings** → **Data API**. Under **Exposed schemas**, add
