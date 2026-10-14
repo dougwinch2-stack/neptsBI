@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=13 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=13">
-  <link rel="stylesheet" href="neptsbi.css?v=13">
-  <script src="dougs.js?v=13"></script>
+  <!-- ?v=14 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=14">
+  <link rel="stylesheet" href="neptsbi.css?v=14">
+  <script src="dougs.js?v=14"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=13"></script>
+  <script src="neptsbi.js?v=14"></script>
 </head>
 <body>
   <header class="app-header">
@@ -97,12 +97,13 @@
       if (kind === "b") return c.baseById.get(+id).name;
       return "the whole company";
     }
-    function viewOptions(current) {
+    // short: phone heading style – ALL, then each region in capitals, then its bases as they are
+    function viewOptions(current, short) {
       const opts = [];
-      if (m.scope.level === "company") opts.push(["all", "Whole company"]);
+      if (m.scope.level === "company") opts.push(["all", short ? "ALL" : "Whole company"]);
       c.regions.forEach(r => {
         if (m.scope.level === "company" || r.id === m.scope.regionId) {
-          opts.push(["r:" + r.id, (m.scope.level === "region" ? "All of " : "Region: ") + r.name]);
+          opts.push(["r:" + r.id, short ? r.name.toUpperCase() : (m.scope.level === "region" ? "All of " : "Region: ") + r.name]);
           c.bases.filter(b => b.region_id === r.id).forEach(b => opts.push(["b:" + b.id, "  " + b.name]));
         }
       });
@@ -182,7 +183,7 @@
       };
       // The place is the heading; people who can look at other places get it as a dropdown instead
       let html = (canChoose
-          ? `<label for="phView" class="visually-hidden">Showing</label><select id="phView" class="ph-title-select">${viewOptions(view)}</select>`
+          ? `<label for="phView" class="visually-hidden">Showing</label><select id="phView" class="ph-title-select">${viewOptions(view, true)}</select>`
           : `<h1 style="margin:0">${esc(viewName(view))}</h1>`) +
         `<p class="ph-sub">${fmtNum(list.length)} vehicles</p>
         <div class="ph-grid"><table>
