@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=28 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=28">
-  <link rel="stylesheet" href="neptsbi.css?v=28">
-  <script src="dougs.js?v=28"></script>
+  <!-- ?v=30 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=30">
+  <link rel="stylesheet" href="neptsbi.css?v=30">
+  <script src="dougs.js?v=30"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=28"></script>
+  <script src="neptsbi.js?v=30"></script>
 </head>
 <body>
   <header class="app-header">
@@ -162,7 +162,20 @@
        Off the road (strict company rule, agreed 14 Oct): MOT expired, OR tested and the result not
        logged yet, OR last test a fail with no pass since. (To move into the database view later.) */
     const isPhone = () => window.matchMedia("(max-width: 700px)").matches;
-    function offRoad(v) { return v.status === "Overdue" || !!v.awaiting_result || v.last_test_result === "Fail"; }
+    function offRoad(v) {
+      if (v.vor != null) return v.vor;                       // from the database (07_vor.sql)
+      return v.status === "Overdue" || !!v.awaiting_result || !!v.retest;
+    }
+    // Who does the admin: base managers and the fleet administrator. Regional managers and above
+    // see the same panels read-only – their job is to chase, not to book or log.
+    const canAct = () => m.role.can_record && (m.scope.level === "base" || m.role.key === "admin");
+    // Demo stand-in for the nightly DVSA check: a van tested but not logged has a result on the DVSA record.
+    // (Real regs: the nightly job fills this from DVSA once the key arrives.) Regs divisible by 4 failed.
+    function dvsaPeek(v) {
+      if (!v.awaiting_result) return null;
+      const num = parseInt(v.registration.replace(/\D/g, ""), 10) || 0;
+      return { result: num % 4 === 0 ? "Fail" : "Pass", date: v.booking_date };
+    }
     // kind "overdue" or "soon" (coming up in the warning window, not booked), for one check
     function phoneBucket(v, check, kind) {
       if (check === "mot") return kind === "overdue" ? offRoad(v) : (!offRoad(v) && v.status === "Due soon" && !v.booked);
@@ -215,7 +228,7 @@
         };
         const status = it => {
           const s = S(it.v, it.check);
-          if (s.awaiting_result) return `<span class="text-danger">Not logged</span>`;
+          if (s.awaiting_result) return `<span class="text-danger">${it.check === "mot" && dvsaPeek(it.v) ? "DVSA – confirm" : "Not logged"}</span>`;
           if (it.check === "mot" && it.v.last_test_result === "Fail" && !s.booked) return `<span class="text-danger">Failed</span>`;
           return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="${it.kind === "overdue" ? "text-danger" : "text-warn"}">Not booked</span>`;
         };
@@ -344,12 +357,18 @@
           row("MOT " + (v.days_to_due < 0 ? "expired" : "runs to"), NB.fmtDay(v.due_date)) +
           row("Last test", v.last_test_date ? `${esc(v.last_test_result)} · ${NB.fmtDay(v.last_test_date)}` : "None yet") +
           row("Booking", v.booked ? `${NB.fmtDay(v.booking_date)} · ${esc(v.booking_centre || "")}` : "Not booked");
-      const action = !m.role.can_record ? "" : s.awaiting_result
+      const dv = !isSvc && dvsaPeek(v);
+      const dvBox = dv ? `<div class="dvsa-box"><strong>DVSA shows a ${dv.result.toLowerCase()}</strong> on ${NB.fmtDay(dv.date)}.
+          ${canAct() ? "Check it against the certificate and confirm." : "Waiting for the base to confirm it."}</div>` : "";
+      const action = !canAct() ? "" : dv
+        ? `<button class="btn btn--primary" type="button" data-confirm-dvsa="${reg}">Check and confirm</button>
+           <button class="link-btn" type="button" data-log="${reg}" data-kind="mot">Type it in instead</button>`
+        : s.awaiting_result
         ? `<button class="btn btn--primary" type="button" data-log="${reg}" data-kind="${check}">Log ${isSvc ? "service" : "result"}</button>`
         : s.booked
           ? `<button class="btn btn--ghost" type="button" data-book="${reg}" data-kind="${check}">Change booking</button>`
           : `<button class="btn ${s.status === "OK" && !(check === "mot" && v.last_test_result === "Fail") ? "btn--ghost" : "btn--primary"}" type="button" data-book="${reg}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book MOT"}</button>`;
-      return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">${facts}</dl>`, action };
+      return { facts: dvBox + `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">${facts}</dl>`, action };
     }
     function openVanPanel(reg, check) {
       const v = c.vehicleByReg.get(reg);
@@ -366,6 +385,7 @@
           }).join("")}${more}</div>`;
       }
       wireActions(p.el, check || "mot");
+      p.el.querySelectorAll("[data-confirm-dvsa]").forEach(b => b.addEventListener("click", () => openLogPanel(b.dataset.confirmDvsa, true)));
     }
 
     // Find one van: search icon in the header → type part of the reg → its panel
@@ -871,7 +891,7 @@
     document.addEventListener("keydown", e => {
       if (e.key.toLowerCase() !== "l" || e.ctrlKey || e.metaKey || e.altKey) return;
       if (document.querySelector(".panel") || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-      if (!m || !m.role.can_record) return;
+      if (!m || !canAct()) return;
       e.preventDefault(); openLogPanel("");
     });
 
@@ -897,10 +917,10 @@
 
     let logDirty = false;   // something saved – the page behind needs redrawing on close
 
-    function openLogPanel(reg) {
+    function openLogPanel(reg, fromDvsa) {
       logDirty = false;
-      const p = NB.openPanel("Log MOT result", { onClose: () => { if (logDirty) render(); } });
-      logForm(p.el, { reg, head: p.head, close: p.close, mode: "panel" });
+      const p = NB.openPanel(fromDvsa ? "Confirm MOT result" : "Log MOT result", { onClose: () => { if (logDirty) render(); } });
+      logForm(p.el, { reg, head: p.head, close: p.close, mode: "panel", fromDvsa: !!fromDvsa });
     }
 
     function renderLogPage(q) {
@@ -1253,6 +1273,8 @@
       }
 
       edit();
+      // "Check and confirm": fill everything from the DVSA record, then go straight to the check step
+      if (opts.fromDvsa) fetchDvsa().then(() => { if (state.fromDvsa) check(); });
     }
 
     /* ---------------- BOOK: side panel (MOT or service) ---------------- */
