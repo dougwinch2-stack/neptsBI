@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=24 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=24">
-  <link rel="stylesheet" href="neptsbi.css?v=24">
-  <script src="dougs.js?v=24"></script>
+  <!-- ?v=25 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=25">
+  <link rel="stylesheet" href="neptsbi.css?v=25">
+  <script src="dougs.js?v=25"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=24"></script>
+  <script src="neptsbi.js?v=25"></script>
 </head>
 <body>
   <header class="app-header">
@@ -199,7 +199,7 @@
         </table></div>`;
 
       const oneBase = view.startsWith("b:");
-      {
+      if (oneBase || fCheck) {
         // The list: everything to do, overdue first, then by due date
         const items = [];
         CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).forEach(ch =>
@@ -245,6 +245,19 @@
           }).join("");
         }).join("");
         html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
+      } else {
+        // Regional / operations, nothing narrowed: one line per base, worst first
+        const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
+          const bl = list.filter(v => v.base_id === b.id);
+          const over = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "overdue"), 0);
+          const soon = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "soon"), 0);
+          return { b, over, soon };
+        }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
+        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--ok"}">${n}</span>`;
+        html += `<div class="ph-bases" style="margin-top:var(--space-4)">
+          <div class="hd"><span class="nm">By base</span><span class="c">Overdue</span><span class="c">Pending</span></div>
+          ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
+        </div>`;
       }
       main.innerHTML = html;
       main.querySelectorAll("tr[data-open]").forEach(tr => {
