@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=17 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=17">
-  <link rel="stylesheet" href="neptsbi.css?v=17">
-  <script src="dougs.js?v=17"></script>
+  <!-- ?v=18 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=18">
+  <link rel="stylesheet" href="neptsbi.css?v=18">
+  <script src="dougs.js?v=18"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=17"></script>
+  <script src="neptsbi.js?v=18"></script>
 </head>
 <body>
   <header class="app-header">
@@ -176,26 +176,60 @@
       const view = allowedView(q.get("view"));
       const list = c.vehicles.filter(v => inView(v, view));
       const canChoose = m.scope.level !== "base";
+      const vq = view === defaultView() ? "" : view;
+      // Narrowed to one check (tap a number or a check name); the phone's back button undoes it
+      const fCheck = CHECKS.some(ch => ch.live && ch.key === q.get("check")) ? q.get("check") : "";
+      const fKind = fCheck && ["overdue", "soon"].includes(q.get("kind")) ? q.get("kind") : "";
       const num = (check, kind) => {
         const n = phoneCount(list, check, kind);
         const cls = n === 0 ? "ph-n ph-n--ok" : kind === "overdue" ? "ph-n ph-n--bad" : "ph-n ph-n--warn";
-        return `<a class="${cls}" href="${link("todo", { check, kind, view: view === defaultView() ? "" : view })}" aria-label="${n} – show the vans">${n}</a>`;
+        const on = fCheck === check && fKind === kind;
+        return `<a class="${cls}${on ? " ph-n--on" : ""}" href="${link("", on ? { view: vq, check } : { view: vq, check, kind })}" aria-label="${n} – show the vans">${n}</a>`;
       };
-      // The place is the heading; people who can look at other places get it as a dropdown instead
+      const title = ch => `<a class="ph-check" href="${link("", fCheck === ch.key ? { view: vq } : { view: vq, check: ch.key })}">${ch.label}</a>`;
       let html = (canChoose
           ? `<label for="phView" class="visually-hidden">Showing</label><select id="phView" class="ph-title-select">${viewOptions(view, true)}</select>`
           : `<h1 style="margin:0">${esc(viewName(view))}</h1>`) +
         `<p class="ph-sub">${fmtNum(list.length)} vehicles</p>
         <div class="ph-grid"><table>
           <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Pending</th></tr></thead>
-          <tbody>${CHECKS.map(ch => (ch.live
-            ? `<tr><th scope="row">${ch.label}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
+          <tbody>${CHECKS.filter(ch => !fCheck || ch.key === fCheck).map(ch => (ch.live
+            ? `<tr><th scope="row">${title(ch)}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
             : `<tr><th scope="row">${ch.label}</th><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td></tr>`)).join("")}</tbody>
-        </table></div>
-        <p class="small muted" style="margin-top:var(--space-3)">Pending = due in the next 30 days, not booked. Tap a number to see the vans.</p>`;
+        </table></div>`;
 
-      // Regional / operations: one line per base, worst first (all checks added together)
-      if (view === "all" || view.startsWith("r:")) {
+      const oneBase = view.startsWith("b:");
+      if (oneBase || fCheck) {
+        // The list: everything to do, overdue first, then by due date
+        const items = [];
+        CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).forEach(ch =>
+          ["overdue", "soon"].filter(k => !fKind || k === fKind).forEach(kind =>
+            list.filter(v => phoneBucket(v, ch.key, kind)).forEach(v => items.push({ v, check: ch.key, kind }))));
+        const dueOf = it => it.check === "service" ? it.v.svc.effective_due_date : it.v.due_date;
+        items.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "overdue" ? -1 : 1) || dueOf(a).localeCompare(dueOf(b)));
+        const dueCell = it => {
+          const d = dueOf(it), late = d < today();
+          // Off the road although the date hasn't come yet (not logged, failed): say why – unless the Status column does
+          if (it.kind === "overdue" && !late) return fCheck ? shortDate(d) : `<span class="text-danger">${shortWhy(it.v, it.check)}</span>`;
+          return `<span class="${it.kind === "overdue" ? "text-danger" : ""}">${shortDate(d)}</span>`;
+        };
+        const status = it => {
+          const s = S(it.v, it.check);
+          if (s.awaiting_result) return `<span class="text-danger">Not logged</span>`;
+          if (it.check === "mot" && it.v.last_test_result === "Fail" && !s.booked) return `<span class="text-danger">Failed</span>`;
+          return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="text-danger">Not booked</span>`;
+        };
+        const label = fCheck ? CHECK_NAME[fCheck] : "";
+        html += items.length ? `<div class="ph-list" style="margin-top:var(--space-4)"><table>
+            <thead><tr><th>Reg</th>${fCheck ? `<th>${label} due</th><th>Status</th>` : `<th>Check</th><th>Due</th>`}</tr></thead>
+            <tbody>${items.map(it => `<tr data-open="${esc(it.v.registration)}" data-check="${it.check}" tabindex="0">
+              <td><span class="reg">${esc(it.v.registration)}</span>${oneBase ? "" : `<div class="small muted">${esc(it.v.base_name)}</div>`}</td>
+              ${fCheck ? `<td>${dueCell(it)}</td><td>${status(it)}</td>` : `<td>${CHECK_NAME[it.check]}</td><td>${dueCell(it)}</td>`}
+            </tr>`).join("")}</tbody>
+          </table></div>`
+          : `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
+      } else {
+        // Regional / operations, nothing narrowed: one line per base, worst first
         const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
           const bl = list.filter(v => v.base_id === b.id);
           const over = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "overdue"), 0);
@@ -203,12 +237,17 @@
           return { b, over, soon };
         }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
         const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--ok"}">${n}</span>`;
-        html += `<h2 class="section-title">By base</h2><div class="ph-bases">
-          <div class="hd"><span class="nm">All checks</span><span class="c">Overdue</span><span class="c">Pending</span></div>
+        html += `<div class="ph-bases" style="margin-top:var(--space-4)">
+          <div class="hd"><span class="nm">By base</span><span class="c">Overdue</span><span class="c">Pending</span></div>
           ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
         </div>`;
       }
       main.innerHTML = html;
+      main.querySelectorAll("tr[data-open]").forEach(tr => {
+        const go = () => openVanPanel(tr.dataset.open, tr.dataset.check);
+        tr.addEventListener("click", go);
+        tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+      });
       const sel = document.getElementById("phView");
       if (sel) {
         // A dropdown is as wide as its longest name; size it to the chosen one so the arrow sits by the word
@@ -1542,7 +1581,7 @@
         else if (parts[0] === "log-mot" || parts[0] === "record") renderLogPage(q);
         else if (parts[0] === "record-service") renderRecordService(q);
         else if (parts[0] === "work") renderWork(q);
-        else if (parts[0] === "todo") renderTodo(q);
+        else if (parts[0] === "todo") { location.replace(link("", { view: q.get("view") || "", check: q.get("check") || "", kind: q.get("kind") || "" })); return; }
         else renderHome(q);
         updateBadge();
         window.scrollTo(0, 0);

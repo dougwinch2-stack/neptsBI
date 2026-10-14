@@ -493,3 +493,12 @@ a.kpi:hover { border-color: var(--border-strong); }
 .ph-title-select:focus { outline: none; }
 .ph-title-select:focus-visible { outline: none; box-shadow: 0 2px 0 currentColor; }
 @media (hover: none) { .ph-title-select:focus-visible { box-shadow: none; } }
+/* 14 Oct 16:35 – check names tap to narrow; list never scrolls sideways */
+.ph-check { color: inherit; text-decoration: none; }
+.ph-check:hover { text-decoration: underline; }
+.ph-n--on { outline: 3px solid currentColor; outline-offset: 2px; }
+.ph-list table { table-layout: fixed; }
+.ph-list td, .ph-list td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }
+.ph-list th:first-child, .ph-list td:first-child { width: 34%; }
+.ph-list th:first-child, .ph-list td:first-child { width: 31%; }
+.ph-list th:nth-child(2), .ph-list td:nth-child(2) { width: 29%; }
