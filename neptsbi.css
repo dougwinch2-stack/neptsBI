@@ -450,3 +450,29 @@ a.kpi:hover { border-color: var(--border-strong); }
 @media (hover: none) { .ph-list tbody tr:hover td { background: transparent; } }
 .panel .facts { grid-template-columns: max-content 1fr; }
 .ph-list td { white-space: nowrap; } .ph-list td:nth-child(2) { white-space: normal; }
+
+/* One-line header: neptsBI · who you are (small) … search ⋮ – same in the demo as in production */
+.app-header__title { margin-right: 0; }
+.who { order: 0; flex: 1 1 auto; flex-basis: auto; min-width: 0; margin: 0; font-size: var(--text-sm); font-weight: 500;
+  opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: center; padding-top: 3px; }
+.app-header__nav { order: 1; }
+.hdr-search { order: 2; display: inline-grid; place-items: center; width: var(--touch); height: var(--touch); border: 0; border-radius: 50%;
+  background: transparent; color: var(--on-fill); cursor: pointer; }
+.hdr-search:hover { background: rgb(255 255 255 / 0.16); }
+.hdr-search[hidden] { display: none; }
+.settings { order: 3; }
+@media (max-width: 700px) {
+  .app-header__nav { display: none; }   /* phone: the grid is home; everything else is a tap away */
+  .app-header__inner { flex-wrap: nowrap; padding-block: var(--space-2); }
+}
+@media (min-width: 701px) { .hdr-search { display: none; } }
+/* Grouped rows in the grid */
+.ph-grid tr.grp th { text-align: left; padding: 14px 12px 4px; color: var(--text-muted); font-size: var(--text-sm); font-weight: 700; }
+.ph-grid tr.grp + tr > * { border-top: 0; }
+.ph-grid tbody tr.grp:not(:first-child) > * { border-top: 1px solid var(--surface-2); }
+/* Find a van */
+.find-list { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+.find-list button { display: flex; align-items: baseline; gap: 10px; width: 100%; min-height: var(--touch); padding: 10px 4px;
+  border: 0; border-bottom: 1px solid var(--surface-2); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.find-list button:hover { background: var(--surface-2); }
+.panel-sec { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); }

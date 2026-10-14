@@ -236,7 +236,7 @@
   function showWho(m) {
     var el = document.getElementById("who");
     if (!el || !m) return;
-    el.innerHTML = '<strong>' + esc(m.person.name) + "</strong>";
+    el.textContent = m.role.label;          // the page heading already says where
     el.hidden = false;
   }
 

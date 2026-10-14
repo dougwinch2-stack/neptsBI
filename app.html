@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=10 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=10">
-  <link rel="stylesheet" href="neptsbi.css?v=10">
-  <script src="dougs.js?v=10"></script>
+  <!-- ?v=11 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=11">
+  <link rel="stylesheet" href="neptsbi.css?v=11">
+  <script src="dougs.js?v=11"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=10"></script>
+  <script src="neptsbi.js?v=11"></script>
 </head>
 <body>
   <header class="app-header">
@@ -22,6 +22,8 @@
         <a href="#/list?status=all" data-nav="list">Vehicles</a>
       </nav>
       <p class="who" id="who" hidden></p>
+      <button class="hdr-search" type="button" id="findBtn" aria-label="Find a van" hidden>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
     </div>
   </header>
 
@@ -38,13 +40,13 @@
     let m = null;      // who is signed in
     let flash = "";    // one-off message shown on the next page
 
-    const CHECKS = [   // rows of the check grid
-      { key: "mot", label: "MOT", live: true },
-      { key: "service", label: "Service", live: true },
-      { key: "clean", label: "Deep clean" },
-      { key: "oxygen", label: "Oxygen" },
-      { key: "fire", label: "Fire extinguisher" },
-      { key: "defib", label: "Defib" }
+    const CHECKS = [   // rows of the check grid, in a fixed order, grouped
+      { key: "mot", label: "MOT", live: true, group: "Vehicle" },
+      { key: "service", label: "Service", live: true, group: "Vehicle" },
+      { key: "clean", label: "Deep clean", group: "Vehicle" },
+      { key: "oxygen", label: "Oxygen", group: "Vehicle" },
+      { key: "defib", label: "Defib", group: "Vehicle" },
+      { key: "fire", label: "Fire extinguisher", group: "Base" }
     ];
     const CHECK_NAME = { mot: "MOT", service: "Service" };
 
@@ -185,9 +187,9 @@
         <p class="ph-sub">${NB.fmtDay(NB.isoToday(), true)} · ${fmtNum(list.length)} vehicles</p>
         <div class="ph-grid"><table>
           <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Pending</th></tr></thead>
-          <tbody>${CHECKS.map(ch => ch.live
+          <tbody>${CHECKS.map((ch, i) => (i === 0 || CHECKS[i - 1].group !== ch.group ? `<tr class="grp"><th colspan="3" scope="rowgroup">${ch.group}</th></tr>` : "") + (ch.live
             ? `<tr><th scope="row">${ch.label}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
-            : `<tr><th scope="row">${ch.label}</th><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td></tr>`).join("")}</tbody>
+            : `<tr><th scope="row">${ch.label}</th><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td></tr>`)).join("")}</tbody>
         </table></div>
         <p class="small muted" style="margin-top:var(--space-3)">Pending = due in the next 30 days, not booked. Tap a number to see the vans.</p>`;
 
@@ -256,10 +258,10 @@
       });
     }
 
-    // The admin panel for one van and one check: the details, and the thing to do
-    function openVanPanel(reg, check) {
-      const v = c.vehicleByReg.get(reg), s = S(v, check), isSvc = check === "service";
-      const p = NB.openPanel(reg);
+    // The admin panel for one van: the details and the thing to do. With a check, just that check;
+    // without (from search), MOT and service one under the other.
+    function vanSection(v, check) {
+      const s = S(v, check), isSvc = check === "service", reg = esc(v.registration);
       const row = (k, val) => `<dt>${k}</dt><dd>${val}</dd>`;
       const facts = isSvc
         ? row("Service", esc(svcWhat(s))) +
@@ -267,22 +269,56 @@
           row("Last service", s.last_service_date ? `${esc(s.last_service_type)} · ${NB.fmtDay(s.last_service_date)}` : "None yet") +
           row("Booking", s.booked ? `${NB.fmtDay(s.booking_date)} · ${esc(s.booking_provider || "")}` : "Not booked")
         : row("Status", offRoad(v) ? '<span class="text-danger" style="font-weight:700">Off the road</span>' : '<span class="text-ok" style="font-weight:700">OK to use</span>') +
-          row("Problem", shortWhy(v, check)) +
+          (offRoad(v) || v.status !== "OK" ? row("Problem", shortWhy(v, check)) : "") +
           row("MOT " + (v.days_to_due < 0 ? "expired" : "runs to"), NB.fmtDay(v.due_date)) +
           row("Last test", v.last_test_date ? `${esc(v.last_test_result)} · ${NB.fmtDay(v.last_test_date)}` : "None yet") +
           row("Booking", v.booked ? `${NB.fmtDay(v.booking_date)} · ${esc(v.booking_centre || "")}` : "Not booked");
-      const main1 = s.awaiting_result
-        ? `<button class="btn btn--primary" type="button" data-log="${esc(reg)}" data-kind="${check}">Log ${isSvc ? "service" : "result"}</button>`
+      const action = !m.role.can_record ? "" : s.awaiting_result
+        ? `<button class="btn btn--primary" type="button" data-log="${reg}" data-kind="${check}">Log ${isSvc ? "service" : "result"}</button>`
         : s.booked
-          ? `<button class="btn btn--ghost" type="button" data-book="${esc(reg)}" data-kind="${check}">Change booking</button>`
-          : `<button class="btn btn--primary" type="button" data-book="${esc(reg)}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book test"}</button>`;
+          ? `<button class="btn btn--ghost" type="button" data-book="${reg}" data-kind="${check}">Change booking</button>`
+          : `<button class="btn ${s.status === "OK" && !(check === "mot" && v.last_test_result === "Fail") ? "btn--ghost" : "btn--primary"}" type="button" data-book="${reg}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book MOT"}</button>`;
+      return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">${facts}</dl>`, action };
+    }
+    function openVanPanel(reg, check) {
+      const v = c.vehicleByReg.get(reg);
+      const p = NB.openPanel(reg);
+      const intro = `<p class="muted" style="margin-top:0">${esc(v.make)} ${esc(v.model)} · ${esc(v.class_short)} · ${esc(v.base_name)}</p>`;
+      const more = `<p style="margin-top:var(--space-4)"><a href="${link("van/" + reg)}">Full vehicle record ›</a></p>`;
+      if (check) {
+        const sec = vanSection(v, check);
+        p.el.innerHTML = `<div class="panel__body">${intro}${sec.facts}${more}</div>${sec.action ? `<div class="panel__foot">${sec.action}</div>` : ""}`;
+      } else {
+        p.el.innerHTML = `<div class="panel__body">${intro}${["mot", "service"].map(ch => {
+            const sec = vanSection(v, ch);
+            return `<h3 class="panel-sec">${CHECK_NAME[ch]}</h3>${sec.facts}${sec.action ? `<div style="margin-top:var(--space-3)">${sec.action}</div>` : ""}`;
+          }).join("")}${more}</div>`;
+      }
+      wireActions(p.el, check || "mot");
+    }
+
+    // Find one van: search icon in the header → type part of the reg → its panel
+    function openFind() {
+      const p = NB.openPanel("Find a van");
+      const mine = c.vehicles.filter(v => inView(v, defaultView()) || m.scope.level === "company");
       p.el.innerHTML = `<div class="panel__body">
-          <p class="muted" style="margin-top:0">${esc(v.make)} ${esc(v.model)} · ${esc(v.class_short)} · ${esc(v.base_name)}</p>
-          <dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">${facts}</dl>
-          <p style="margin-top:var(--space-4)"><a href="${link("van/" + reg)}">Full vehicle record ›</a></p>
-        </div>
-        ${m.role.can_record ? `<div class="panel__foot">${main1}</div>` : ""}`;
-      wireActions(p.el, check);
+          <div class="field"><label for="findReg">Reg or fleet number</label>
+            <input class="input" id="findReg" autocomplete="off" spellcheck="false" placeholder="e.g. 058"></div>
+          <ul class="find-list" id="findList"></ul>
+        </div>`;
+      const inp = p.el.querySelector("#findReg"), ul = p.el.querySelector("#findList");
+      const draw = () => {
+        const t = normReg(inp.value);
+        const hits = t ? mine.filter(v => normReg(v.registration).includes(t) || normReg(v.fleet_number).includes(t)).slice(0, 20) : [];
+        ul.innerHTML = t && !hits.length ? `<li class="muted" style="padding:12px 0">No van matching “${esc(inp.value)}”.</li>`
+          : hits.map(v => `<li><button type="button" data-reg="${esc(v.registration)}"><span class="reg">${esc(v.registration)}</span>
+              <span class="small muted">${esc(v.make)} ${esc(v.model)}${m.scope.level === "base" ? "" : " · " + esc(v.base_name)}</span>
+              ${offRoad(v) ? '<span class="small text-danger" style="margin-left:auto;font-weight:700">Off road</span>' : ""}</button></li>`).join("");
+      };
+      inp.addEventListener("input", draw);
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); const first = ul.querySelector("[data-reg]"); if (first) openVanPanel(first.dataset.reg); } });
+      ul.addEventListener("click", e => { const b = e.target.closest("[data-reg]"); if (b) openVanPanel(b.dataset.reg); });
+      inp.focus();
     }
 
     function renderHome(q) {
@@ -1509,6 +1545,8 @@
         m = NB.requireMe(c);
         NB.showWho(m);
         if (m.role.can_record) document.querySelector('[data-nav="work"]').hidden = false;
+        const fb = document.getElementById("findBtn");
+        fb.hidden = false; fb.addEventListener("click", openFind);
         document.title = "neptsBI – " + m.person.name;
         window.addEventListener("hashchange", render);
         render();
