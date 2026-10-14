@@ -476,3 +476,13 @@ a.kpi:hover { border-color: var(--border-strong); }
   border: 0; border-bottom: 1px solid var(--surface-2); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .find-list button:hover { background: var(--surface-2); }
 .panel-sec { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); }
+/* No dividers between grid rows (14 Oct) */
+.ph-grid tbody tr + tr > * { border-top: 0; }
+/* Dropdown as the page heading (regional / company roles) */
+.ph-title-select {
+  appearance: none; -webkit-appearance: none; max-width: 100%; margin: 0; padding: 2px 32px 2px 0; border: 0; background: transparent;
+  color: var(--text); font: inherit; font-size: var(--text-2xl); font-weight: 700; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 12px center, right 6px center; background-size: 6px 6px; background-repeat: no-repeat;
+}
+.ph-title-select option { font-size: 1rem; font-weight: 400; color: #17212b; }

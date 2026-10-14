@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=11 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=11">
-  <link rel="stylesheet" href="neptsbi.css?v=11">
-  <script src="dougs.js?v=11"></script>
+  <!-- ?v=12 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=12">
+  <link rel="stylesheet" href="neptsbi.css?v=12">
+  <script src="dougs.js?v=12"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=11"></script>
+  <script src="neptsbi.js?v=12"></script>
 </head>
 <body>
   <header class="app-header">
@@ -180,14 +180,14 @@
         const cls = n === 0 ? "ph-n ph-n--ok" : kind === "overdue" ? "ph-n ph-n--bad" : "ph-n ph-n--warn";
         return `<a class="${cls}" href="${link("todo", { check, kind, view: view === defaultView() ? "" : view })}" aria-label="${n} – show the vans">${n}</a>`;
       };
-      let html = `<div class="row row--between" style="align-items:end;margin-bottom:var(--space-1)">
-          <h1 style="margin:0">${esc(view === "all" ? "Whole company" : viewName(view))}</h1>
-          ${canChoose ? `<div class="field" style="min-width:150px"><label for="phView" class="visually-hidden">Showing</label><select id="phView">${viewOptions(view)}</select></div>` : ""}
-        </div>
-        <p class="ph-sub">${NB.fmtDay(NB.isoToday(), true)} · ${fmtNum(list.length)} vehicles</p>
+      // The place is the heading; people who can look at other places get it as a dropdown instead
+      let html = (canChoose
+          ? `<label for="phView" class="visually-hidden">Showing</label><select id="phView" class="ph-title-select">${viewOptions(view)}</select>`
+          : `<h1 style="margin:0">${esc(viewName(view))}</h1>`) +
+        `<p class="ph-sub">${fmtNum(list.length)} vehicles</p>
         <div class="ph-grid"><table>
           <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Pending</th></tr></thead>
-          <tbody>${CHECKS.map((ch, i) => (i === 0 || CHECKS[i - 1].group !== ch.group ? `<tr class="grp"><th colspan="3" scope="rowgroup">${ch.group}</th></tr>` : "") + (ch.live
+          <tbody>${CHECKS.map(ch => (ch.live
             ? `<tr><th scope="row">${ch.label}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
             : `<tr><th scope="row">${ch.label}</th><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td></tr>`)).join("")}</tbody>
         </table></div>
