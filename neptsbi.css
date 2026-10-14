@@ -528,3 +528,5 @@ a.kpi:hover { border-color: var(--border-strong); }
 .ob__n { width: 72px; text-align: center; color: var(--danger-text); font-weight: 800; font-size: var(--text-lg); }
 .ob__line:hover span:first-child { text-decoration: underline; }
 .ob__head .ob__ok { padding-bottom: 6px; }
+.ob__n--p { color: var(--warn-text); }
+.ob__n--ok { color: var(--ok-text); }

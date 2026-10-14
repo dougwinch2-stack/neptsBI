@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=27 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=27">
-  <link rel="stylesheet" href="neptsbi.css?v=27">
-  <script src="dougs.js?v=27"></script>
+  <!-- ?v=28 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=28">
+  <link rel="stylesheet" href="neptsbi.css?v=28">
+  <script src="dougs.js?v=28"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=27"></script>
+  <script src="neptsbi.js?v=28"></script>
 </head>
 <body>
   <header class="app-header">
@@ -253,11 +253,11 @@
           : c.bases.filter(b => "r:" + b.region_id === view).map(b => ({ name: b.name, view: "b:" + b.id, vans: list.filter(v => v.base_id === b.id) }));
         html += `<h2 class="ph-list-title">By ${view === "all" ? "region" : "base"}</h2><div class="ob">
           ${groups.map(g => {
-            const bad = CHECKS.filter(ch => ch.live).map(ch => ({ ch, n: phoneCount(g.vans, ch.key, "overdue") })).filter(x => x.n);
+            const bad = CHECKS.filter(ch => ch.live).map(ch => ({ ch, n: phoneCount(g.vans, ch.key, "overdue"), p: phoneCount(g.vans, ch.key, "soon") })).filter(x => x.n || x.p);
             // Base name on the same line as the "Overdue" title; its overdue checks stacked underneath
             return `<div class="ob__grp"><div class="ob__head"><a class="ob__name" href="${link("", { view: g.view })}">${esc(g.name)} <span class="muted">›</span></a>
-                ${bad.length ? '<span class="ob__col">Overdue</span>' : '<span class="ob__ok">✓ All clear</span>'}</div>
-              ${bad.map(x => `<a class="ob__line" href="${link("", { view: g.view, check: x.ch.key, kind: "overdue" })}"><span>${x.ch.label}</span><span class="ob__n">${x.n}</span></a>`).join("")}
+                ${bad.length ? '<span class="ob__col">Overdue</span><span class="ob__col">Pending</span>' : '<span class="ob__ok">✓ All clear</span>'}</div>
+              ${bad.map(x => `<a class="ob__line" href="${link("", { view: g.view, check: x.ch.key })}"><span>${x.ch.label}</span><span class="ob__n${x.n ? "" : " ob__n--ok"}">${x.n}</span><span class="ob__n ob__n--p${x.p ? "" : " ob__n--ok"}">${x.p}</span></a>`).join("")}
             </div>`;
           }).join("")}
         </div>`;
