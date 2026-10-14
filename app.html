@@ -5,15 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
-  <!-- ?v= makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=7">
-  <link rel="stylesheet" href="neptsbi.css?v=8">
-  <script src="dougs.js?v=7"></script>
+  <!-- ?v=9 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=9">
+  <link rel="stylesheet" href="neptsbi.css?v=9">
+  <script src="dougs.js?v=9"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=7"></script>
+  <script src="neptsbi.js?v=9"></script>
 </head>
 <body>
   <header class="app-header">
@@ -158,9 +155,101 @@
 
     /* ---------------- DASHBOARD (status only – the work lives on the Work page) ---------------- */
 
+    /* ---------------- PHONE: the daily check ----------------
+       Off the road (strict company rule, agreed 14 Oct): MOT expired, OR tested and the result not
+       logged yet, OR last test a fail with no pass since. (To move into the database view later.) */
+    const isPhone = () => window.matchMedia("(max-width: 700px)").matches;
+    function offRoad(v) { return v.status === "Overdue" || !!v.awaiting_result || v.last_test_result === "Fail"; }
+    // kind "overdue" or "soon" (coming up in the warning window, not booked), for one check
+    function phoneBucket(v, check, kind) {
+      if (check === "mot") return kind === "overdue" ? offRoad(v) : (!offRoad(v) && v.status === "Due soon" && !v.booked);
+      const s = v.svc;
+      return kind === "overdue" ? (s.status === "Overdue" || !!s.awaiting_result) : (s.status === "Due soon" && !s.booked && !s.awaiting_result);
+    }
+    const phoneCount = (list, check, kind) => list.filter(v => phoneBucket(v, check, kind)).length;
+
+    function renderPhoneHome(q) {
+      setNav("home");
+      const view = allowedView(q.get("view"));
+      const list = c.vehicles.filter(v => inView(v, view));
+      const canChoose = m.scope.level !== "base";
+      const num = (check, kind) => {
+        const n = phoneCount(list, check, kind);
+        const cls = n === 0 ? "ph-n ph-n--zero" : kind === "overdue" ? "ph-n ph-n--bad" : "ph-n ph-n--warn";
+        return `<a class="${cls}" href="${link("todo", { check, kind, view: view === defaultView() ? "" : view })}" aria-label="${n} – show the vans">${n}</a>`;
+      };
+      let html = `<div class="row row--between" style="align-items:end;margin-bottom:var(--space-1)">
+          <h1 style="margin:0">${esc(view === "all" ? "Whole company" : viewName(view))}</h1>
+          ${canChoose ? `<div class="field" style="min-width:150px"><label for="phView" class="visually-hidden">Showing</label><select id="phView">${viewOptions(view)}</select></div>` : ""}
+        </div>
+        <p class="ph-sub">${NB.fmtDay(NB.isoToday(), true)} · ${fmtNum(list.length)} vehicles</p>
+        <div class="ph-grid"><table>
+          <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Coming up,<br>not booked</th></tr></thead>
+          <tbody>${CHECKS.map(ch => ch.live
+            ? `<tr><th scope="row">${ch.label}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
+            : `<tr class="soon"><th scope="row">${ch.label}</th><td colspan="2">Coming soon</td></tr>`).join("")}</tbody>
+        </table></div>
+        <p class="small muted" style="margin-top:var(--space-3)">Tap a number to see the vans and sort them out.</p>`;
+
+      // Regional / operations: one line per base, worst first (all checks added together)
+      if (view === "all" || view.startsWith("r:")) {
+        const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
+          const bl = list.filter(v => v.base_id === b.id);
+          const over = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "overdue"), 0);
+          const soon = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "soon"), 0);
+          return { b, over, soon };
+        }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
+        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--zero"}">${n}</span>`;
+        html += `<h2 class="section-title">By base</h2><div class="ph-bases">
+          <div class="hd"><span class="nm">All checks</span><span class="c">Overdue</span><span class="c">Not booked</span></div>
+          ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
+        </div>`;
+      }
+      main.innerHTML = html;
+      const sel = document.getElementById("phView");
+      if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
+    }
+
+    // Behind a number: the vans, each with one thing to do (to be revised)
+    function renderTodo(q) {
+      setNav("home");
+      const check = q.get("check") === "service" ? "service" : "mot";
+      const kind = q.get("kind") === "soon" ? "soon" : "overdue";
+      const view = allowedView(q.get("view"));
+      const isSvc = check === "service";
+      const list = c.vehicles.filter(v => inView(v, view) && phoneBucket(v, check, kind))
+        .sort((a, b) => dueSort(a, b, check));
+      const why = v => {
+        const s = S(v, check);
+        if (isSvc) return s.awaiting_result ? `In for service ${NB.fmtDay(s.booking_date, true)} – result not logged` : svcWhat(s) + (s.booked ? ` · booked ${NB.fmtDay(s.booking_date, true)}` : " · not booked");
+        if (v.awaiting_result) return `Tested ${NB.fmtDay(v.booking_date, true)} – result not logged`;
+        if (v.last_test_result === "Fail") return `Failed ${NB.fmtDay(v.last_test_date, true)} – needs a retest` + (v.booked ? ` · booked ${NB.fmtDay(v.booking_date, true)}` : "");
+        const d = v.days_to_due;
+        const when = d < 0 ? `MOT expired ${-d === 1 ? "yesterday" : -d + " days ago"}` : `MOT runs out ${NB.fmtDay(v.due_date, true)} – in ${d} day${d === 1 ? "" : "s"}`;
+        return when + (v.booked ? ` · booked ${NB.fmtDay(v.booking_date, true)}` : " · not booked");
+      };
+      const act = v => {
+        const s = S(v, check), reg = esc(v.registration);
+        if (s.awaiting_result) return `<button class="btn btn--primary" type="button" data-log="${reg}" data-kind="${check}">Log result</button>`;
+        if (s.booked) return `<button class="link-btn" type="button" data-book="${reg}" data-kind="${check}">Change booking</button>`;
+        return `<button class="btn btn--primary" type="button" data-book="${reg}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book test"}</button>`;
+      };
+      main.innerHTML = `<a class="back-link" href="${link("", { view: view === defaultView() ? "" : view })}">${esc(view === "all" ? "Whole company" : viewName(view))}</a>
+        <h1 style="margin:0">${isSvc ? "Service" : "MOT"} – ${kind === "overdue" ? "overdue" : "coming up, not booked"} <span class="muted">(${list.length})</span></h1>
+        ${kind === "overdue" && !isSvc ? `<p style="margin:2px 0 var(--space-4);color:var(--danger-text);font-weight:600">Off the road until sorted</p>` : `<p class="ph-sub">Due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days</p>`}
+        ${list.length ? `<div class="stack">${list.map(v => `<div class="van-card">
+            <a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a>
+            ${m.scope.level === "base" ? "" : `<span class="small muted">${esc(v.base_name)}</span>`}
+            <div>${why(v)}</div>
+            ${m.role.can_record ? `<div>${act(v)}</div>` : ""}
+          </div>`).join("")}</div>` : `<div class="empty">Nothing here – all sorted.</div>`}`;
+      wireActions(main, check);
+    }
+
     function renderHome(q) {
       setNav("home");
       if (m.role.key === "driver") return renderDriverHome();
+      if (isPhone()) return renderPhoneHome(q);
 
       const view = allowedView(q.get("view"));
       const list = c.vehicles.filter(v => inView(v, view));
@@ -1366,6 +1455,7 @@
         else if (parts[0] === "log-mot" || parts[0] === "record") renderLogPage(q);
         else if (parts[0] === "record-service") renderRecordService(q);
         else if (parts[0] === "work") renderWork(q);
+        else if (parts[0] === "todo") renderTodo(q);
         else renderHome(q);
         updateBadge();
         window.scrollTo(0, 0);
