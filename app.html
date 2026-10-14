@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=9 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=9">
-  <link rel="stylesheet" href="neptsbi.css?v=9">
-  <script src="dougs.js?v=9"></script>
+  <!-- ?v=10 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=10">
+  <link rel="stylesheet" href="neptsbi.css?v=10">
+  <script src="dougs.js?v=10"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=9"></script>
+  <script src="neptsbi.js?v=10"></script>
 </head>
 <body>
   <header class="app-header">
@@ -175,7 +175,7 @@
       const canChoose = m.scope.level !== "base";
       const num = (check, kind) => {
         const n = phoneCount(list, check, kind);
-        const cls = n === 0 ? "ph-n ph-n--zero" : kind === "overdue" ? "ph-n ph-n--bad" : "ph-n ph-n--warn";
+        const cls = n === 0 ? "ph-n ph-n--ok" : kind === "overdue" ? "ph-n ph-n--bad" : "ph-n ph-n--warn";
         return `<a class="${cls}" href="${link("todo", { check, kind, view: view === defaultView() ? "" : view })}" aria-label="${n} – show the vans">${n}</a>`;
       };
       let html = `<div class="row row--between" style="align-items:end;margin-bottom:var(--space-1)">
@@ -184,12 +184,12 @@
         </div>
         <p class="ph-sub">${NB.fmtDay(NB.isoToday(), true)} · ${fmtNum(list.length)} vehicles</p>
         <div class="ph-grid"><table>
-          <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Coming up,<br>not booked</th></tr></thead>
+          <thead><tr><th><span class="visually-hidden">Check</span></th><th scope="col">Overdue</th><th scope="col">Pending</th></tr></thead>
           <tbody>${CHECKS.map(ch => ch.live
             ? `<tr><th scope="row">${ch.label}</th><td>${num(ch.key, "overdue")}</td><td>${num(ch.key, "soon")}</td></tr>`
-            : `<tr class="soon"><th scope="row">${ch.label}</th><td colspan="2">Coming soon</td></tr>`).join("")}</tbody>
+            : `<tr><th scope="row">${ch.label}</th><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td><td><span class="ph-n ph-n--ok" title="Coming soon">0</span></td></tr>`).join("")}</tbody>
         </table></div>
-        <p class="small muted" style="margin-top:var(--space-3)">Tap a number to see the vans and sort them out.</p>`;
+        <p class="small muted" style="margin-top:var(--space-3)">Pending = due in the next 30 days, not booked. Tap a number to see the vans.</p>`;
 
       // Regional / operations: one line per base, worst first (all checks added together)
       if (view === "all" || view.startsWith("r:")) {
@@ -199,9 +199,9 @@
           const soon = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "soon"), 0);
           return { b, over, soon };
         }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
-        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--zero"}">${n}</span>`;
+        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--ok"}">${n}</span>`;
         html += `<h2 class="section-title">By base</h2><div class="ph-bases">
-          <div class="hd"><span class="nm">All checks</span><span class="c">Overdue</span><span class="c">Not booked</span></div>
+          <div class="hd"><span class="nm">All checks</span><span class="c">Overdue</span><span class="c">Pending</span></div>
           ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
         </div>`;
       }
@@ -210,7 +210,26 @@
       if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
     }
 
-    // Behind a number: the vans, each with one thing to do (to be revised)
+    // Behind a number: a plain list – reg, what's wrong, booking. Tap a row for the details panel.
+    function shortWhy(v, check) {
+      const s = S(v, check);
+      if (check === "service") {
+        if (s.awaiting_result) return "Not logged";
+        if (s.miles_left < 0) return `${fmtNum(-s.miles_left)} miles over`;
+        const d = NB.daysBetween(today(), s.effective_due_date);
+        return d < 0 ? `${-d} day${d === -1 ? "" : "s"} over` : `Due ${shortDate(s.effective_due_date)}`;
+      }
+      if (v.awaiting_result) return "Not logged";
+      if (v.last_test_result === "Fail") return "Failed";
+      const d = v.days_to_due;
+      return d < 0 ? `Expired ${-d === 1 ? "1 day" : -d + " days"}` : `Due ${shortDate(v.due_date)}`;
+    }
+    function shortBooking(v, check) {
+      const s = S(v, check);
+      if (s.awaiting_result) return `Tested ${shortDate(s.booking_date)}`;
+      return s.booked ? `Booked ${shortDate(s.booking_date)}` : `<span class="text-danger">Not booked</span>`;
+    }
+
     function renderTodo(q) {
       setNav("home");
       const check = q.get("check") === "service" ? "service" : "mot";
@@ -219,31 +238,51 @@
       const isSvc = check === "service";
       const list = c.vehicles.filter(v => inView(v, view) && phoneBucket(v, check, kind))
         .sort((a, b) => dueSort(a, b, check));
-      const why = v => {
-        const s = S(v, check);
-        if (isSvc) return s.awaiting_result ? `In for service ${NB.fmtDay(s.booking_date, true)} – result not logged` : svcWhat(s) + (s.booked ? ` · booked ${NB.fmtDay(s.booking_date, true)}` : " · not booked");
-        if (v.awaiting_result) return `Tested ${NB.fmtDay(v.booking_date, true)} – result not logged`;
-        if (v.last_test_result === "Fail") return `Failed ${NB.fmtDay(v.last_test_date, true)} – needs a retest` + (v.booked ? ` · booked ${NB.fmtDay(v.booking_date, true)}` : "");
-        const d = v.days_to_due;
-        const when = d < 0 ? `MOT expired ${-d === 1 ? "yesterday" : -d + " days ago"}` : `MOT runs out ${NB.fmtDay(v.due_date, true)} – in ${d} day${d === 1 ? "" : "s"}`;
-        return when + (v.booked ? ` · booked ${NB.fmtDay(v.booking_date, true)}` : " · not booked");
-      };
-      const act = v => {
-        const s = S(v, check), reg = esc(v.registration);
-        if (s.awaiting_result) return `<button class="btn btn--primary" type="button" data-log="${reg}" data-kind="${check}">Log result</button>`;
-        if (s.booked) return `<button class="link-btn" type="button" data-book="${reg}" data-kind="${check}">Change booking</button>`;
-        return `<button class="btn btn--primary" type="button" data-book="${reg}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book test"}</button>`;
-      };
       main.innerHTML = `<a class="back-link" href="${link("", { view: view === defaultView() ? "" : view })}">${esc(view === "all" ? "Whole company" : viewName(view))}</a>
-        <h1 style="margin:0">${isSvc ? "Service" : "MOT"} – ${kind === "overdue" ? "overdue" : "coming up, not booked"} <span class="muted">(${list.length})</span></h1>
-        ${kind === "overdue" && !isSvc ? `<p style="margin:2px 0 var(--space-4);color:var(--danger-text);font-weight:600">Off the road until sorted</p>` : `<p class="ph-sub">Due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days</p>`}
-        ${list.length ? `<div class="stack">${list.map(v => `<div class="van-card">
-            <a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a>
-            ${m.scope.level === "base" ? "" : `<span class="small muted">${esc(v.base_name)}</span>`}
-            <div>${why(v)}</div>
-            ${m.role.can_record ? `<div>${act(v)}</div>` : ""}
-          </div>`).join("")}</div>` : `<div class="empty">Nothing here – all sorted.</div>`}`;
-      wireActions(main, check);
+        <h1 style="margin:0">${isSvc ? "Service" : "MOT"} – ${kind === "overdue" ? "overdue" : "pending"} <span class="muted">(${list.length})</span></h1>
+        <p class="ph-sub">${kind === "overdue" ? (isSvc ? "Past the date or the miles" : "Off the road until sorted") : `Due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days, not booked`}</p>
+        ${list.length ? `<div class="ph-list"><table>
+            <thead><tr><th>Reg</th><th>${kind === "overdue" ? "Problem" : "Due"}</th><th>${kind === "overdue" ? "Booking" : ""}</th><th><span class="visually-hidden">Open</span></th></tr></thead>
+            <tbody>${list.map(v => `<tr data-open="${esc(v.registration)}" tabindex="0">
+              <td><span class="reg">${esc(v.registration)}</span>${m.scope.level === "base" ? "" : `<div class="small muted">${esc(v.base_name)}</div>`}</td>
+              <td>${shortWhy(v, check)}</td>
+              <td class="small">${kind === "overdue" ? shortBooking(v, check) : `in ${isSvc ? NB.daysBetween(today(), v.svc.effective_due_date) : v.days_to_due} days`}</td>
+              <td class="chev" aria-hidden="true">›</td></tr>`).join("")}</tbody>
+          </table></div>` : `<div class="empty">Nothing here – all sorted.</div>`}`;
+      main.querySelectorAll("tr[data-open]").forEach(tr => {
+        const go = () => openVanPanel(tr.dataset.open, check);
+        tr.addEventListener("click", go);
+        tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+      });
+    }
+
+    // The admin panel for one van and one check: the details, and the thing to do
+    function openVanPanel(reg, check) {
+      const v = c.vehicleByReg.get(reg), s = S(v, check), isSvc = check === "service";
+      const p = NB.openPanel(reg);
+      const row = (k, val) => `<dt>${k}</dt><dd>${val}</dd>`;
+      const facts = isSvc
+        ? row("Service", esc(svcWhat(s))) +
+          row("Next due", `${fmtNum(s.due_odometer)} miles or ${NB.fmtDay(s.due_date)}`) +
+          row("Last service", s.last_service_date ? `${esc(s.last_service_type)} · ${NB.fmtDay(s.last_service_date)}` : "None yet") +
+          row("Booking", s.booked ? `${NB.fmtDay(s.booking_date)} · ${esc(s.booking_provider || "")}` : "Not booked")
+        : row("Status", offRoad(v) ? '<span class="text-danger" style="font-weight:700">Off the road</span>' : '<span class="text-ok" style="font-weight:700">OK to use</span>') +
+          row("Problem", shortWhy(v, check)) +
+          row("MOT " + (v.days_to_due < 0 ? "expired" : "runs to"), NB.fmtDay(v.due_date)) +
+          row("Last test", v.last_test_date ? `${esc(v.last_test_result)} · ${NB.fmtDay(v.last_test_date)}` : "None yet") +
+          row("Booking", v.booked ? `${NB.fmtDay(v.booking_date)} · ${esc(v.booking_centre || "")}` : "Not booked");
+      const main1 = s.awaiting_result
+        ? `<button class="btn btn--primary" type="button" data-log="${esc(reg)}" data-kind="${check}">Log ${isSvc ? "service" : "result"}</button>`
+        : s.booked
+          ? `<button class="btn btn--ghost" type="button" data-book="${esc(reg)}" data-kind="${check}">Change booking</button>`
+          : `<button class="btn btn--primary" type="button" data-book="${esc(reg)}" data-kind="${check}">${isSvc ? "Book service" : v.last_test_result === "Fail" ? "Book retest" : "Book test"}</button>`;
+      p.el.innerHTML = `<div class="panel__body">
+          <p class="muted" style="margin-top:0">${esc(v.make)} ${esc(v.model)} · ${esc(v.class_short)} · ${esc(v.base_name)}</p>
+          <dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">${facts}</dl>
+          <p style="margin-top:var(--space-4)"><a href="${link("van/" + reg)}">Full vehicle record ›</a></p>
+        </div>
+        ${m.role.can_record ? `<div class="panel__foot">${main1}</div>` : ""}`;
+      wireActions(p.el, check);
     }
 
     function renderHome(q) {

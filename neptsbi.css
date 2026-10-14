@@ -436,3 +436,17 @@ a.kpi:hover { border-color: var(--border-strong); }
 .work, .kpi, .dash-card, .page-form { border: 0; }
 .chip { border-color: var(--border); }
 .ph-bases .hd .c { font-size: var(--text-sm); font-weight: 600; }
+.ph-n--ok { background: var(--ok-soft); color: var(--ok-text); }
+.ph-bases .c--ok { color: var(--ok-text); }
+/* Drill-down: plain list, tap a row */
+.ph-list { background: var(--surface); border-radius: 14px; overflow: hidden; }
+.ph-list table { width: 100%; border-collapse: collapse; }
+.ph-list th { text-align: left; color: var(--text-muted); font-size: var(--text-sm); font-weight: 600; padding: 10px 12px; }
+.ph-list td { padding: 12px; border-top: 1px solid var(--surface-2); vertical-align: middle; }
+.ph-list tbody tr { cursor: pointer; }
+.ph-list tbody tr:hover td, .ph-list tbody tr:focus-visible td { background: var(--surface-2); }
+.ph-list .chev { width: 1%; color: var(--text-muted); font-size: 1.3rem; padding-left: 0; }
+.ph-list .reg { font-size: var(--text-md); }
+@media (hover: none) { .ph-list tbody tr:hover td { background: transparent; } }
+.panel .facts { grid-template-columns: max-content 1fr; }
+.ph-list td { white-space: nowrap; } .ph-list td:nth-child(2) { white-space: normal; }
