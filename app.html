@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=23 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=23">
-  <link rel="stylesheet" href="neptsbi.css?v=23">
-  <script src="dougs.js?v=23"></script>
+  <!-- ?v=24 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=24">
+  <link rel="stylesheet" href="neptsbi.css?v=24">
+  <script src="dougs.js?v=24"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=23"></script>
+  <script src="neptsbi.js?v=24"></script>
 </head>
 <body>
   <header class="app-header">
@@ -199,7 +199,7 @@
         </table></div>`;
 
       const oneBase = view.startsWith("b:");
-      if (oneBase || fCheck) {
+      {
         // The list: everything to do, overdue first, then by due date
         const items = [];
         CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).forEach(ch =>
@@ -245,19 +245,6 @@
           }).join("");
         }).join("");
         html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
-      } else {
-        // Regional / operations, nothing narrowed: one line per base, worst first
-        const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
-          const bl = list.filter(v => v.base_id === b.id);
-          const over = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "overdue"), 0);
-          const soon = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "soon"), 0);
-          return { b, over, soon };
-        }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
-        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--ok"}">${n}</span>`;
-        html += `<div class="ph-bases" style="margin-top:var(--space-4)">
-          <div class="hd"><span class="nm">By base</span><span class="c">Overdue</span><span class="c">Pending</span></div>
-          ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
-        </div>`;
       }
       main.innerHTML = html;
       main.querySelectorAll("tr[data-open]").forEach(tr => {
@@ -310,7 +297,7 @@
         .sort((a, b) => dueSort(a, b, check));
       main.innerHTML = `<a class="back-link" href="${link("", { view: view === defaultView() ? "" : view })}">${esc(view === "all" ? "Whole company" : viewName(view))}</a>
         <h1 style="margin:0">${isSvc ? "Service" : "MOT"} – ${kind === "overdue" ? "overdue" : "pending"} <span class="muted">(${list.length})</span></h1>
-        <p class="ph-sub">${kind === "overdue" ? (isSvc ? "Past the date or the miles" : "Off the road until sorted") : `Due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days, not booked`}</p>
+        <p class="ph-sub">${kind === "overdue" ? (isSvc ? "Past the date or the miles" : "VOR until sorted") : `Due in the next ${c.rules[isSvc ? "service_warning_days" : "mot_warning_days"].value} days, not booked`}</p>
         ${list.length ? `<div class="ph-list"><table>
             <thead><tr><th>Reg</th><th>${kind === "overdue" ? "Problem" : "Due"}</th><th>${kind === "overdue" ? "Booking" : ""}</th><th><span class="visually-hidden">Open</span></th></tr></thead>
             <tbody>${list.map(v => `<tr data-open="${esc(v.registration)}" tabindex="0">
@@ -336,7 +323,7 @@
           row("Next due", `${fmtNum(s.due_odometer)} miles or ${NB.fmtDay(s.due_date)}`) +
           row("Last service", s.last_service_date ? `${esc(s.last_service_type)} · ${NB.fmtDay(s.last_service_date)}` : "None yet") +
           row("Booking", s.booked ? `${NB.fmtDay(s.booking_date)} · ${esc(s.booking_provider || "")}` : "Not booked")
-        : row("Status", offRoad(v) ? '<span class="text-danger" style="font-weight:700">Off the road</span>' : '<span class="text-ok" style="font-weight:700">OK to use</span>') +
+        : row("Status", offRoad(v) ? '<span class="text-danger" style="font-weight:700">VOR</span> <span class="muted">(vehicle off road)</span>' : '<span class="text-ok" style="font-weight:700">OK to use</span>') +
           (offRoad(v) || v.status !== "OK" ? row("Problem", shortWhy(v, check)) : "") +
           row("MOT " + (v.days_to_due < 0 ? "expired" : "runs to"), NB.fmtDay(v.due_date)) +
           row("Last test", v.last_test_date ? `${esc(v.last_test_result)} · ${NB.fmtDay(v.last_test_date)}` : "None yet") +
@@ -381,7 +368,7 @@
         ul.innerHTML = t && !hits.length ? `<li class="muted" style="padding:12px 0">No van matching “${esc(inp.value)}”.</li>`
           : hits.map(v => `<li><button type="button" data-reg="${esc(v.registration)}"><span class="reg">${esc(v.registration)}</span>
               <span class="small muted">${esc(v.make)} ${esc(v.model)}${m.scope.level === "base" ? "" : " · " + esc(v.base_name)}</span>
-              ${offRoad(v) ? '<span class="small text-danger" style="margin-left:auto;font-weight:700">Off road</span>' : ""}</button></li>`).join("");
+              ${offRoad(v) ? '<span class="small text-danger" style="margin-left:auto;font-weight:700">VOR</span>' : ""}</button></li>`).join("");
       };
       inp.addEventListener("input", draw);
       inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); const first = ul.querySelector("[data-reg]"); if (first) openVanPanel(first.dataset.reg); } });
@@ -419,7 +406,7 @@
 
       html += `<div class="kpis">
           <a class="kpi" href="${L("overdue")}">
-            <div class="kpi__label">Off the road (VOR)</div>
+            <div class="kpi__label">VOR (vehicle off road)</div>
             <div class="kpi__value${vor.length ? " kpi__value--bad" : ""}">${vor.length}</div>
             <div class="kpi__sub">${vor.length ? "No valid MOT" : "Every van has a valid MOT"}</div>
           </a>
@@ -604,7 +591,7 @@
           </article>
           <article class="card ${off.length ? "card--danger" : "card--ok"}">
             <div class="card__eyebrow">${esc(base.name)}</div>
-            <h2 class="card__title">Off the road today</h2>
+            <h2 class="card__title">VOR today</h2>
             ${off.length ? `<ul class="item-list">${off.map(v =>
               `<li><a class="reg" href="${link("van/" + v.registration)}">${esc(v.registration)}</a> – MOT expired ${fmtDate(v.due_date)}</li>`).join("")}</ul>
               <p class="card__desc">Don't take these out until the MOT is done.</p>`
@@ -771,7 +758,7 @@
     // The MOT position in a few plain words
     function motWhat(v) {
       const d = v.days_to_due;
-      if (d < 0) return `MOT expired ${-d === 1 ? "yesterday" : -d + " days ago"} – off the road`;
+      if (d < 0) return `MOT expired ${-d === 1 ? "yesterday" : -d + " days ago"} – VOR`;
       if (d === 0) return "MOT runs out today";
       return `MOT runs out ${NB.fmtDay(v.due_date, true)} – in ${d} day${d === 1 ? "" : "s"}`;
     }
@@ -796,7 +783,7 @@
         return svcWhat(s);
       }
       if (stage === "result") return `Tested ${NB.fmtDay(s.booking_date, true)}`;
-      if (stage === "retest") return `Failed ${NB.fmtDay(v.last_test_date, true)} · ${v.days_to_due < 0 ? "off the road" : "MOT still runs to " + NB.fmtDay(v.due_date, true)}`;
+      if (stage === "retest") return `Failed ${NB.fmtDay(v.last_test_date, true)} · ${v.days_to_due < 0 ? "VOR" : "MOT still runs to " + NB.fmtDay(v.due_date, true)}`;
       return motWhat(v) + (v.retest ? " · retest" : "");
     }
     function nextCell(r, check) {
@@ -987,7 +974,7 @@
           el.className = "lf-hint";
           if (!state.reg) { el.textContent = "Type any part of the reg"; return; }
           if (!vv) { el.textContent = normReg(state.reg).length >= 6 ? "No van with that reg" : ""; el.className = "lf-hint lf-hint--bad"; return; }
-          el.textContent = vv.days_to_due < 0 ? `MOT expired ${NB.fmtDay(vv.due_date)} – off the road` : `Current MOT runs to ${NB.fmtDay(vv.due_date)}`;
+          el.textContent = vv.days_to_due < 0 ? `MOT expired ${NB.fmtDay(vv.due_date)} – VOR` : `Current MOT runs to ${NB.fmtDay(vv.due_date)}`;
         };
         const preview = name => {
           const el = f.querySelector(`[data-prev="${name}"]`);
@@ -1276,7 +1263,7 @@
           <div class="field"><label for="bkWhere">${isSvc ? "Workshop" : "Test centre"}</label>
             <select class="input" id="bkWhere">${opts.map(o => `<option value="${o.id}"${o.id === pick.id ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></div>
           <div class="field"><label for="bkNotes">Notes <span class="muted">(optional)</span></label>
-            <input class="input" id="bkNotes" type="text" maxlength="500" value="${s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "Off the road until MOT") : ""}"></div>
+            <input class="input" id="bkNotes" type="text" maxlength="500" value="${s.status === "Overdue" ? (isSvc ? "Over the mileage – first free slot" : "VOR until MOT") : ""}"></div>
           <div class="errbox" data-err role="alert"></div>
         </div></div>
         <div class="panel__foot"><button class="btn btn--primary" type="submit">Book</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
