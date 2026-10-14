@@ -507,3 +507,13 @@ a.kpi:hover { border-color: var(--border-strong); }
 .ph-list-title { margin: var(--space-6) 0 0; font-size: var(--text-xl); }
 .ph-list-sub { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-md); font-weight: 700; color: var(--text-muted); }
 .ph-list-title { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); }
+/* Overdue by base / region: one line each */
+.ob { background: var(--surface); border-radius: 14px; overflow: hidden; }
+.ob__row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 14px; }
+.ob__row + .ob__row { border-top: 1px solid var(--border); }
+.ob__name { flex: 0 0 40%; min-width: 0; color: inherit; font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.ob__checks { flex: 1 1 0; min-width: 0; }
+.ob__tag { color: var(--danger-text); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.ob__tag:hover, .ob__name:hover { text-decoration: underline; }
+.ob__dot { color: var(--text-muted); margin: 0 6px; }
+.ob__ok { color: var(--ok-text); font-weight: 700; }

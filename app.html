@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=25 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=25">
-  <link rel="stylesheet" href="neptsbi.css?v=25">
-  <script src="dougs.js?v=25"></script>
+  <!-- ?v=26 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=26">
+  <link rel="stylesheet" href="neptsbi.css?v=26">
+  <script src="dougs.js?v=26"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=25"></script>
+  <script src="neptsbi.js?v=26"></script>
 </head>
 <body>
   <header class="app-header">
@@ -246,17 +246,19 @@
         }).join("");
         html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
       } else {
-        // Regional / operations, nothing narrowed: one line per base, worst first
-        const bases = c.bases.filter(b => view === "all" || "r:" + b.region_id === view).map(b => {
-          const bl = list.filter(v => v.base_id === b.id);
-          const over = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "overdue"), 0);
-          const soon = ["mot", "service"].reduce((n, ch) => n + phoneCount(bl, ch, "soon"), 0);
-          return { b, over, soon };
-        }).sort((a, b) => b.over - a.over || b.soon - a.soon || a.b.name.localeCompare(b.b.name));
-        const cc = (n, t) => `<span class="c ${n ? "c--" + t : "c--ok"}">${n}</span>`;
-        html += `<div class="ph-bases" style="margin-top:var(--space-4)">
-          <div class="hd"><span class="nm">By base</span><span class="c">Overdue</span><span class="c">Pending</span></div>
-          ${bases.map(x => `<a href="${link("", { view: "b:" + x.b.id })}"><span class="nm">${esc(x.b.name)} <span class="muted">›</span></span>${cc(x.over, "bad")}${cc(x.soon, "warn")}</a>`).join("")}
+        // Regional / operations, nothing narrowed: overdue by base (or by region for the whole company),
+        // one line each, only the checks with something overdue
+        const groups = view === "all"
+          ? c.regions.map(r => ({ name: r.name, view: "r:" + r.id, vans: list.filter(v => v.region_id === r.id) }))
+          : c.bases.filter(b => "r:" + b.region_id === view).map(b => ({ name: b.name, view: "b:" + b.id, vans: list.filter(v => v.base_id === b.id) }));
+        html += `<h2 class="ph-list-title">Overdue by ${view === "all" ? "region" : "base"}</h2><div class="ob">
+          ${groups.map(g => {
+            const bad = CHECKS.filter(ch => ch.live).map(ch => ({ ch, n: phoneCount(g.vans, ch.key, "overdue") })).filter(x => x.n);
+            return `<div class="ob__row"><a class="ob__name" href="${link("", { view: g.view })}">${esc(g.name)}</a>
+              <span class="ob__checks">${bad.length
+                ? bad.map(x => `<a class="ob__tag" href="${link("", { view: g.view, check: x.ch.key, kind: "overdue" })}">${x.ch.label} ${x.n}</a>`).join('<span class="ob__dot">·</span>')
+                : '<span class="ob__ok">✓ All clear</span>'}</span></div>`;
+          }).join("")}
         </div>`;
       }
       main.innerHTML = html;
