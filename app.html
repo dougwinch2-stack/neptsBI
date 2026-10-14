@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=20 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=20">
-  <link rel="stylesheet" href="neptsbi.css?v=20">
-  <script src="dougs.js?v=20"></script>
+  <!-- ?v=21 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=21">
+  <link rel="stylesheet" href="neptsbi.css?v=21">
+  <script src="dougs.js?v=21"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=20"></script>
+  <script src="neptsbi.js?v=21"></script>
 </head>
 <body>
   <header class="app-header">
@@ -231,12 +231,16 @@
           </table></div>`;
         const tables = checks.map(ck => {
           const rows = items.filter(it => it.check === ck);
-          if (!fCheck) return rows.length ? `<h2 class="ph-list-title">${CHECK_NAME[ck]} <span class="muted">(${rows.length})</span></h2>${table(rows, ck, true)}` : "";
-          return ["overdue", "soon"].filter(k => !fKind || k === fKind).map(k => {
+          if (!rows.length) return "";
+          // Front page: a heading per check, then its Overdue and Pending tables. One check: just the two tables.
+          const parts = ["overdue", "soon"].filter(k => !fKind || k === fKind).map(k => {
             const part = rows.filter(it => it.kind === k);
-            return `<h2 class="ph-list-title">${k === "overdue" ? "Overdue" : "Pending"} <span class="muted">(${part.length})</span></h2>` +
+            if (!part.length && !fCheck) return "";
+            const name = k === "overdue" ? "Overdue" : "Pending";
+            return `<h3 class="ph-list-sub">${fCheck ? name : CHECK_NAME[ck] + " – " + name.toLowerCase()} <span class="muted">(${part.length})</span></h3>` +
               (part.length ? table(part, ck, k === "overdue") : `<p class="muted" style="margin:0">None.</p>`);
           }).join("");
+          return parts;
         }).join("");
         html += tables || `<div class="empty" style="margin-top:var(--space-4)">Nothing to do – all green.</div>`;
       } else {

@@ -503,3 +503,4 @@ a.kpi:hover { border-color: var(--border-strong); }
 .ph-list th:first-child, .ph-list td:first-child { width: 31%; }
 .ph-list th:nth-child(2), .ph-list td:nth-child(2) { width: 29%; }
 .ph-list-title { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); font-weight: 700; }
+.ph-list-sub { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); font-weight: 700; }
