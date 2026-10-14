@@ -486,3 +486,9 @@ a.kpi:hover { border-color: var(--border-strong); }
   background-position: right 12px center, right 6px center; background-size: 6px 6px; background-repeat: no-repeat;
 }
 .ph-title-select option { font-size: 1rem; font-weight: 400; color: #17212b; }
+/* 14 Oct 01:40 – tighter rows, lines back (theme colour), no stuck border on the heading dropdown */
+.ph-grid th, .ph-grid td { padding-top: 6px; padding-bottom: 6px; }
+.ph-grid tbody tr + tr > * { border-top: 1px solid var(--border); }
+.ph-n { width: 56px; height: 44px; border-radius: 10px; font-size: 1.5rem; }
+.ph-title-select:focus { outline: none; }
+.ph-title-select:focus-visible { outline: none; box-shadow: 0 2px 0 currentColor; }

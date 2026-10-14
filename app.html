@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=12 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=12">
-  <link rel="stylesheet" href="neptsbi.css?v=12">
-  <script src="dougs.js?v=12"></script>
+  <!-- ?v=13 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=13">
+  <link rel="stylesheet" href="neptsbi.css?v=13">
+  <script src="dougs.js?v=13"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=12"></script>
+  <script src="neptsbi.js?v=13"></script>
 </head>
 <body>
   <header class="app-header">
@@ -209,7 +209,10 @@
       }
       main.innerHTML = html;
       const sel = document.getElementById("phView");
-      if (sel) sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
+      if (sel) {
+        sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
+        sel.addEventListener("blur", () => sel.blur());
+      }
     }
 
     // Behind a number: a plain list – reg, what's wrong, booking. Tap a row for the details panel.
