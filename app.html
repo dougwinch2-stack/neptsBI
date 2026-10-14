@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=30 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=30">
-  <link rel="stylesheet" href="neptsbi.css?v=30">
-  <script src="dougs.js?v=30"></script>
+  <!-- ?v=31 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=31">
+  <link rel="stylesheet" href="neptsbi.css?v=31">
+  <script src="dougs.js?v=31"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=30"></script>
+  <script src="neptsbi.js?v=31"></script>
 </head>
 <body>
   <header class="app-header">
@@ -45,13 +45,15 @@
       { key: "service", label: "Service", live: true, group: "Vehicle" },
       { key: "clean", label: "Deep clean", group: "Vehicle" },
       { key: "oxygen", label: "Oxygen", group: "Vehicle" },
-      { key: "defib", label: "Defib", group: "Vehicle" },
-      { key: "fire", label: "Fire extinguisher", group: "Base" }
+      { key: "defib", label: "Defib", group: "Vehicle", live: true, equip: true },
+      { key: "fire", label: "Fire extinguisher", group: "Base", live: true, equip: true }
     ];
-    const CHECK_NAME = { mot: "MOT", service: "Service" };
+    const CHECK_NAME = { mot: "MOT", service: "Service", defib: "Defib", fire: "Fire extinguisher" };
 
     // The status object for one check on one vehicle (MOT lives on the vehicle, service on v.svc)
-    const S = (v, check) => check === "service" ? v.svc : v;
+    const S = (v, check) => check === "service" ? v.svc
+      : check === "mot" ? v
+      : (v.eq && v.eq[check]) || { status: "OK", booked: false, items: 0 };   // fire / defib
 
     /* ---------------- helpers ---------------- */
 
@@ -179,7 +181,7 @@
     // kind "overdue" or "soon" (coming up in the warning window, not booked), for one check
     function phoneBucket(v, check, kind) {
       if (check === "mot") return kind === "overdue" ? offRoad(v) : (!offRoad(v) && v.status === "Due soon" && !v.booked);
-      const s = v.svc;
+      const s = S(v, check);
       return kind === "overdue" ? (s.status === "Overdue" || !!s.awaiting_result) : (s.status === "Due soon" && !s.booked && !s.awaiting_result);
     }
     const phoneCount = (list, check, kind) => list.filter(v => phoneBucket(v, check, kind)).length;
@@ -218,7 +220,7 @@
         CHECKS.filter(ch => ch.live && (!fCheck || ch.key === fCheck)).forEach(ch =>
           ["overdue", "soon"].filter(k => !fKind || k === fKind).forEach(kind =>
             list.filter(v => phoneBucket(v, ch.key, kind)).forEach(v => items.push({ v, check: ch.key, kind }))));
-        const dueOf = it => it.check === "service" ? it.v.svc.effective_due_date : it.v.due_date;
+        const dueOf = it => it.check === "service" ? it.v.svc.effective_due_date : it.check === "mot" ? it.v.due_date : S(it.v, it.check).due_date;
         items.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "overdue" ? -1 : 1) || dueOf(a).localeCompare(dueOf(b)));
         const dueCell = it => {
           const d = dueOf(it), late = d < today();
@@ -305,6 +307,11 @@
         const d = NB.daysBetween(today(), s.effective_due_date);
         return d < 0 ? `${-d} day${d === -1 ? "" : "s"} over` : `Due ${shortDate(s.effective_due_date)}`;
       }
+      if (check !== "mot") {                                   // fire / defib
+        const d = s.days_to_due;
+        const part = s.items > 1 && s.items_overdue && s.items_overdue < s.items ? ` (${s.items_overdue} of ${s.items})` : "";
+        return (d < 0 ? `Expired ${-d === 1 ? "1 day" : -d + " days"}` : `Due ${shortDate(s.due_date)}`) + part;
+      }
       if (v.awaiting_result) return "Not logged";
       if (v.last_test_result === "Fail") return "Failed";
       const d = v.days_to_due;
@@ -347,6 +354,17 @@
     function vanSection(v, check) {
       const s = S(v, check), isSvc = check === "service", reg = esc(v.registration);
       const row = (k, val) => `<dt>${k}</dt><dd>${val}</dd>`;
+      if (check === "fire" || check === "defib") {
+        if (!s.items) return { facts: `<p class="muted">No ${CHECK_NAME[check].toLowerCase()} recorded for this van.</p>`, action: "" };
+        const word = check === "fire" ? (s.items === 1 ? "1 extinguisher" : s.items + " extinguishers") : "1 defib";
+        return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">` +
+          row("On board", word) +
+          row("Status", s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date${s.items > 1 ? ` (${s.items_overdue} of ${s.items})` : ""}</span>` : s.status === "Due soon" ? `<span class="text-warn" style="font-weight:700">Due soon</span>` : '<span class="text-ok" style="font-weight:700">In date</span>') +
+          row("Last checked", NB.fmtDay(s.last_check)) +
+          row("Due", NB.fmtDay(s.due_date)) +
+          row("Next check day", NB.fmtDay(s.next_check_day) + (s.booked ? "" : ' <span class="text-warn">– after it runs out</span>')) +
+          `</dl>`, action: "" };
+      }
       const facts = isSvc
         ? row("Service", esc(svcWhat(s))) +
           row("Next due", `${fmtNum(s.due_odometer)} miles or ${NB.fmtDay(s.due_date)}`) +
@@ -379,7 +397,7 @@
         const sec = vanSection(v, check);
         p.el.innerHTML = `<div class="panel__body">${intro}${sec.facts}${more}</div>${sec.action ? `<div class="panel__foot">${sec.action}</div>` : ""}`;
       } else {
-        p.el.innerHTML = `<div class="panel__body">${intro}${["mot", "service"].map(ch => {
+        p.el.innerHTML = `<div class="panel__body">${intro}${CHECKS.filter(ch => ch.live && (!ch.equip || c.hasEquipment)).map(ch => ch.key).map(ch => {
             const sec = vanSection(v, ch);
             return `<h3 class="panel-sec">${CHECK_NAME[ch]}</h3>${sec.facts}${sec.action ? `<div style="margin-top:var(--space-3)">${sec.action}</div>` : ""}`;
           }).join("")}${more}</div>`;
