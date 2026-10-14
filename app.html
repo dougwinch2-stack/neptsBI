@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=15 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=15">
-  <link rel="stylesheet" href="neptsbi.css?v=15">
-  <script src="dougs.js?v=15"></script>
+  <!-- ?v=16 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=16">
+  <link rel="stylesheet" href="neptsbi.css?v=16">
+  <script src="dougs.js?v=16"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=15"></script>
+  <script src="neptsbi.js?v=16"></script>
 </head>
 <body>
   <header class="app-header">
@@ -104,7 +104,7 @@
       c.regions.forEach(r => {
         if (m.scope.level === "company" || r.id === m.scope.regionId) {
           opts.push(["r:" + r.id, short ? r.name.toUpperCase() : (m.scope.level === "region" ? "All of " : "Region: ") + r.name]);
-          c.bases.filter(b => b.region_id === r.id).forEach(b => opts.push(["b:" + b.id, "  " + b.name]));
+          c.bases.filter(b => b.region_id === r.id).forEach(b => opts.push(["b:" + b.id, (short ? "" : "  ") + b.name]));
         }
       });
       return opts.map(([v, l]) => `<option value="${v}"${v === current ? " selected" : ""}>${esc(l)}</option>`).join("");
@@ -215,9 +215,9 @@
         const probe = document.createElement("span");
         probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
         probe.style.font = getComputedStyle(sel).font;
-        probe.textContent = sel.selectedOptions[0].textContent.trim();
+        probe.textContent = sel.selectedOptions[0].textContent;
         document.body.appendChild(probe);
-        sel.style.width = Math.ceil(probe.getBoundingClientRect().width) + 30 + "px";
+        sel.style.width = Math.ceil(probe.getBoundingClientRect().width) + 40 + "px";
         probe.remove();
         sel.addEventListener("change", () => { location.hash = link("", { view: sel.value }); });
         sel.addEventListener("blur", () => sel.blur());
