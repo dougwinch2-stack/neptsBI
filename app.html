@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=31 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=31">
-  <link rel="stylesheet" href="neptsbi.css?v=31">
-  <script src="dougs.js?v=31"></script>
+  <!-- ?v=32 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=32">
+  <link rel="stylesheet" href="neptsbi.css?v=32">
+  <script src="dougs.js?v=32"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=31"></script>
+  <script src="neptsbi.js?v=32"></script>
 </head>
 <body>
   <header class="app-header">
@@ -360,6 +360,7 @@
         return { facts: `<dl class="facts" style="font-size:var(--text-md);row-gap:var(--space-2)">` +
           row("On board", word) +
           row("Status", s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date${s.items > 1 ? ` (${s.items_overdue} of ${s.items})` : ""}</span>` : s.status === "Due soon" ? `<span class="text-warn" style="font-weight:700">Due soon</span>` : '<span class="text-ok" style="font-weight:700">In date</span>') +
+          (s.items_missed ? row("Check day", `<span class="text-danger" style="font-weight:700">Missed on ${NB.fmtDay(s.last_check_day)}</span>${s.items > 1 ? ` (${s.items_missed} of ${s.items})` : ""}`) : "") +
           row("Last checked", NB.fmtDay(s.last_check)) +
           row("Due", NB.fmtDay(s.due_date)) +
           row("Next check day", NB.fmtDay(s.next_check_day) + (s.booked ? "" : ' <span class="text-warn">– after it runs out</span>')) +

@@ -278,6 +278,28 @@
       setTimeout(function () { location.reload(); }, 400);
     });
     panel.appendChild(reset);
+
+    // Demo story for fire extinguishers and defibs: all green, or a few missed on their check day
+    if (!db) return;
+    db.from("rules").select("value").eq("key", "demo_problems").then(function (r) {
+      if (r.error || !r.data || !r.data.length) return;          // 08_equipment.sql not run yet
+      var on = Number(r.data[0].value) === 1;
+      var story = document.createElement("button");
+      story.type = "button";
+      story.className = "settings__link settings__row";
+      story.dataset.nb = "story";
+      story.innerHTML = 'Demo story <span class="settings__value">' + (on ? "a few problems" : "all green") + "</span>";
+      story.title = "Fire extinguishers and defibs: switch between all in date and a few missed on their check day";
+      story.addEventListener("click", async function () {
+        story.disabled = true;
+        story.querySelector(".settings__value").textContent = "switching…";
+        var res = await db.rpc("set_demo_problems", { p_on: !on });
+        story.querySelector(".settings__value").textContent = res.error ? "failed" : (on ? "all green" : "a few problems");
+        invalidate();
+        setTimeout(function () { location.reload(); }, 300);
+      });
+      panel.insertBefore(story, reset);
+    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addMenuRows);
