@@ -285,26 +285,49 @@
     });
     panel.appendChild(reset);
 
-    // Demo story for fire extinguishers and defibs: all green, or a few missed on their check day
+    // Demo: pick a numbered demo (11_demos.sql) – loads it from a clean start
     if (!db) return;
-    db.from("rules").select("value").eq("key", "demo_problems").then(function (r) {
-      if (r.error || !r.data || !r.data.length) return;          // 08_equipment.sql not run yet
-      var on = Number(r.data[0].value) === 1;
-      var story = document.createElement("button");
-      story.type = "button";
-      story.className = "settings__link settings__row";
-      story.dataset.nb = "story";
-      story.innerHTML = 'Demo story <span class="settings__value">' + (on ? "a few problems" : "all green") + "</span>";
-      story.title = "Fire extinguishers and defibs: switch between all in date and a few missed on their check day";
-      story.addEventListener("click", async function () {
-        story.disabled = true;
-        story.querySelector(".settings__value").textContent = "switching…";
-        var res = await db.rpc("set_demo_problems", { p_on: !on });
-        story.querySelector(".settings__value").textContent = res.error ? "failed" : (on ? "all green" : "a few problems");
+    Promise.all([
+      db.from("demos").select("*").order("n"),
+      db.from("rules").select("value").eq("key", "demo_story")
+    ]).then(function (r) {
+      if (r[0].error || !r[0].data || !r[0].data.length) return;     // 11_demos.sql not run yet
+      var demos = r[0].data, cur = r[1].data && r[1].data.length ? Number(r[1].data[0].value) : 1;
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "settings__link settings__row";
+      row.dataset.nb = "demo";
+      row.innerHTML = 'Demo <span class="settings__value">' + cur + "</span>";
+      row.addEventListener("click", function () { pickDemo(demos, cur); });
+      panel.insertBefore(row, reset);
+      reset.querySelector(".settings__value").textContent = "restart demo " + cur;
+    });
+  }
+
+  // Side panel: the demos, one line each; tap one to load it
+  function pickDemo(demos, cur) {
+    var btn = document.querySelector(".settings__button");
+    if (btn && btn.getAttribute("aria-expanded") === "true") btn.click();   // close the ⋮ menu
+    var p = openPanel("Pick a demo");
+    p.el.innerHTML = '<div class="panel__body"><p class="muted" style="margin-top:0">Loading a demo starts it from the beginning – anything changed in this one is wiped.</p>' +
+      '<div class="demo-list">' + demos.map(function (d) {
+        return '<button type="button" class="demo-pick" data-n="' + d.n + '"' + (d.n === cur ? ' aria-current="true"' : "") + ">" +
+          '<span class="demo-pick__title">Demo ' + d.n + " – " + esc(d.title) + (d.n === cur ? ' <span class="demo-pick__now">loaded</span>' : "") + "</span>" +
+          '<span class="demo-pick__desc">' + esc(d.description) + "</span></button>";
+      }).join("") + '</div><div class="errbox" data-err role="alert"></div></div>';
+    p.el.querySelectorAll(".demo-pick").forEach(function (b) {
+      b.addEventListener("click", async function () {
+        p.el.querySelectorAll(".demo-pick").forEach(function (x) { x.disabled = true; });
+        b.querySelector(".demo-pick__title").insertAdjacentHTML("beforeend", ' <span class="demo-pick__now">loading…</span>');
+        var res = await db.rpc("set_demo", { p_n: Number(b.dataset.n) });
+        if (res.error) {
+          p.el.querySelector("[data-err]").textContent = friendlyError(res.error);
+          p.el.querySelectorAll(".demo-pick").forEach(function (x) { x.disabled = false; });
+          return;
+        }
         invalidate();
-        setTimeout(function () { location.reload(); }, 300);
+        location.reload();
       });
-      panel.insertBefore(story, reset);
     });
   }
 

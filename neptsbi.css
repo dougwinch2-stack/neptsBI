@@ -550,3 +550,17 @@ a.kpi:hover { border-color: var(--border-strong); }
   .panel__head [data-steps] { order: 3; flex-basis: 100%; }
   .panel__head h2 { flex: 1; }
 }
+
+/* Demo picker (⋮ › Demo) */
+.demo-list { display: grid; gap: 10px; }
+.demo-pick {
+  display: grid; gap: 4px; padding: 12px 16px; text-align: left; font: inherit; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text);
+}
+.demo-pick:hover { border-color: var(--border-strong); }
+.demo-pick[aria-current="true"] { border: 2px solid var(--brand-fill); }
+.demo-pick:disabled { cursor: progress; opacity: .7; }
+.demo-pick__title { font-weight: 700; }
+.demo-pick__now { font-weight: 400; font-size: var(--text-sm); color: var(--text-muted); }
+.demo-pick__desc { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.4; }
+@media (hover: none) { .demo-pick:hover { border-color: var(--border); } }
