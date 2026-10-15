@@ -8,6 +8,8 @@
 --            12 → backlog; everything else green (MOT / service problems already sorted)
 -- More demos: add a row to demos and a branch in apply_demo_story.
 -- Replaces the "Demo story" on/off switch (set_demo_problems). Safe to run more than once.
+-- Fix 15 Oct 22:50: every UPDATE inside the reset has a WHERE – Supabase refuses UPDATEs without one
+-- when they come from the app ("UPDATE requires a WHERE clause").
 -- =====================================================================
 set search_path = neptsbi, public;
 begin;
@@ -83,9 +85,12 @@ begin
 
   if story = 2 then
     -- MOT: every VOR van tested and passed (on its booking day if it had one), bookings closed
+    drop table if exists fix_mot;
     create temp table fix_mot on commit drop as
       select id as vehicle_id, booking_date, awaiting_result,
-             case when awaiting_result then booking_date else current_date - 1 end as test_date
+             -- on its booking day; otherwise yesterday – or the day of its last test if later (a fail today → passed today)
+             case when awaiting_result then greatest(booking_date, coalesce(last_test_date, booking_date))
+                  else least(current_date, greatest(current_date - 1, coalesce(last_test_date, current_date - 1))) end as test_date
       from vehicle_mot where vor;
     insert into mot_tests (vehicle_id, test_date, result, expiry_date, mileage, centre_id, recorded_at)
     select f.vehicle_id, f.test_date, 'Pass', mot_expiry_for(f.vehicle_id, f.test_date),
@@ -101,6 +106,7 @@ begin
     from vehicle_mot where status = 'Due soon' and not booked and not vor;
 
     -- Service: overdue / waiting for a result → serviced (on its booking day if it had one), bookings closed
+    drop table if exists fix_svc;
     create temp table fix_svc on commit drop as
       select vehicle_id, case when awaiting_result then booking_date else current_date - 1 end as service_date
       from vehicle_service where status = 'Overdue' or awaiting_result;
@@ -117,6 +123,37 @@ begin
     select vehicle_id, current_date + 3 + vehicle_id % 10, provider, now() - interval '3 days'
     from vehicle_service where status = 'Due soon' and not booked and not awaiting_result;
   end if;
+end $$;
+
+-- roll_clock: every UPDATE has a WHERE (Supabase refuses UPDATEs without one from the app)
+create or replace function roll_clock() returns int
+language plpgsql security definer set search_path = neptsbi as $$
+declare
+  shift int;
+begin
+  select current_date - data_date into shift from demo_clock for update;
+  if shift is null or shift = 0 then return 0; end if;
+
+  update vehicles         set first_registered = first_registered + shift,
+                              lease_end        = lease_end + shift where true;
+  update mot_tests        set test_date   = test_date + shift,
+                              expiry_date = expiry_date + shift,
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
+  update mot_bookings     set appointment_date = appointment_date + shift,
+                              recorded_at      = recorded_at + make_interval(days => shift) where true;
+  update daily_mileage    set day = day + shift where true;
+  update service_records  set service_date = service_date + shift,
+                              recorded_at  = recorded_at + make_interval(days => shift) where true;
+  update service_bookings set appointment_date = appointment_date + shift,
+                              recorded_at      = recorded_at + make_interval(days => shift) where true;
+  update equipment_items  set expiry_date = expiry_date + shift where expiry_date is not null;
+  update equipment_items  set fitted_at   = fitted_at + shift   where fitted_at is not null;
+  update equipment_checks set check_date  = check_date + shift,
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
+  update deep_cleans      set clean_date  = clean_date + shift,
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
+  update demo_clock       set data_date = current_date where true;
+  return shift;
 end $$;
 
 -- ---------- Reset: wipe demo changes, roll dates, load the current story ----------
@@ -138,7 +175,7 @@ begin
   delete from vehicles where not demo_seed;
   perform roll_clock();
   perform apply_demo_story();
-  update demo_clock set last_reset = now();
+  update demo_clock set last_reset = now() where true;
   return removed;
 end $$;
 

@@ -176,7 +176,7 @@ begin
   update mot_bookings set cancelled = false where demo_seed and cancelled;
   delete from vehicles where not demo_seed;
   perform roll_clock();
-  update demo_clock set last_reset = now();
+  update demo_clock set last_reset = now() where true;
   return format('Demo reset: removed %s demo change(s)', removed);
 end $$;
 
@@ -190,24 +190,24 @@ begin
   if shift is null or shift = 0 then return 0; end if;
 
   update vehicles         set first_registered = first_registered + shift,
-                              lease_end        = lease_end + shift;
+                              lease_end        = lease_end + shift where true;
   update mot_tests        set test_date   = test_date + shift,
                               expiry_date = expiry_date + shift,
-                              recorded_at = recorded_at + make_interval(days => shift);
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
   update mot_bookings     set appointment_date = appointment_date + shift,
-                              recorded_at      = recorded_at + make_interval(days => shift);
-  update daily_mileage    set day = day + shift;
+                              recorded_at      = recorded_at + make_interval(days => shift) where true;
+  update daily_mileage    set day = day + shift where true;
   update service_records  set service_date = service_date + shift,
-                              recorded_at  = recorded_at + make_interval(days => shift);
+                              recorded_at  = recorded_at + make_interval(days => shift) where true;
   update service_bookings set appointment_date = appointment_date + shift,
-                              recorded_at      = recorded_at + make_interval(days => shift);
+                              recorded_at      = recorded_at + make_interval(days => shift) where true;
   update equipment_items  set expiry_date = expiry_date + shift where expiry_date is not null;
   update equipment_items  set fitted_at   = fitted_at + shift   where fitted_at is not null;
   update equipment_checks set check_date  = check_date + shift,
-                              recorded_at = recorded_at + make_interval(days => shift);
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
   update deep_cleans      set clean_date  = clean_date + shift,
-                              recorded_at = recorded_at + make_interval(days => shift);
-  update demo_clock       set data_date = current_date;
+                              recorded_at = recorded_at + make_interval(days => shift) where true;
+  update demo_clock       set data_date = current_date where true;
   return shift;
 end $$;
 
