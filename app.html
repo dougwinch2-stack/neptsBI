@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=34 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=34">
-  <link rel="stylesheet" href="neptsbi.css?v=34">
-  <script src="dougs.js?v=34"></script>
+  <!-- ?v=35 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=35">
+  <link rel="stylesheet" href="neptsbi.css?v=35">
+  <script src="dougs.js?v=35"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=34"></script>
+  <script src="neptsbi.js?v=35"></script>
 </head>
 <body>
   <header class="app-header">
@@ -1414,11 +1414,17 @@
                  <input class="input" id="eqNotes" type="text" maxlength="500" placeholder="e.g. after an infectious patient"></div>`
             : `<div class="field"><span class="label">Result</span>${tiles("Result", [{ v: "Pass", on: true, label: "Checked – OK" }, { v: "Replaced", on: false, label: "Replaced" }])}</div>
                ${dateField("Checked on", today())}`}
+          <div class="warnbox" data-warn role="alert" hidden></div>
           <div class="errbox" data-err role="alert"></div>
         </div></div>
         <div class="panel__foot"><button class="btn btn--primary" type="submit">Save</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
       </form>`;
       const f = p.el.querySelector("form"), d = f.querySelector("#eqDate");
+      // "Please check" (oxygen): a new cylinder normally has years left – warn, but let them save
+      const warn = f.querySelector("[data-warn]");
+      let checked = "";
+      const clearWarn = () => { warn.hidden = true; checked = ""; f.querySelector("[type=submit]").textContent = "Save"; };
+      d.addEventListener("input", clearWarn);
       const iso = () => NB.parseTyped(d.value);   // "" empty, null not a date
       const prev = () => {
         const el = f.querySelector("[data-prev]"), x = iso();
@@ -1439,6 +1445,13 @@
         if (!day) { err.textContent = kind === "oxygen" ? "Type the date from the new cylinder's label, as dd/mm/yyyy." : "Type the date as dd/mm/yyyy."; d.focus(); return; }
         if (kind === "oxygen" && day <= today()) { err.textContent = "The new cylinder must run out after today – check the label."; d.focus(); return; }
         if (kind !== "oxygen" && (day > today() || day < NB.isoToday(-30))) { err.textContent = "It must be a date in the last 30 days."; d.focus(); return; }
+        const left = NB.daysBetween(today(), day);
+        if (kind === "oxygen" && left < 365 && checked !== day) {
+          warn.innerHTML = `<span class="warnbox__title">Please check</span><span>This cylinder runs out in ${left < 60 ? left + " day" + (left === 1 ? "" : "s") : Math.floor(left / 30.4) + " months"} (${NB.fmtDay(day)}). A new cylinder usually has years left – check the label.</span>`;
+          warn.hidden = false; checked = day;
+          f.querySelector("[type=submit]").textContent = "Save anyway";
+          return;
+        }
         const who = m.person.code;
         const call = kind === "clean" ? NB.db.rpc("log_deep_clean", { p_registration: reg, p_date: day, p_notes: f.querySelector("#eqNotes").value, p_person: who })
           : kind === "oxygen" ? NB.db.rpc("swap_oxygen", { p_item_id: +picked(), p_new_expiry: day, p_person: who })
@@ -1446,7 +1459,7 @@
         const btn = f.querySelector("[type=submit]");
         btn.disabled = true; btn.textContent = "Saving…";
         const r = await call;
-        if (r.error) { err.textContent = NB.friendlyError(r.error); btn.disabled = false; btn.textContent = "Save"; return; }
+        if (r.error) { err.textContent = NB.friendlyError(r.error); btn.disabled = false; btn.textContent = checked ? "Save anyway" : "Save"; return; }
         await reload();
         p.close();
         render();
