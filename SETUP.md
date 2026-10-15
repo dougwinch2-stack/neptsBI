@@ -18,9 +18,10 @@ Run these files **in order**: open each one, copy everything, paste it into
 9. `sql/09_cleans_oxygen.sql`: deep cleans and oxygen cylinders
 10. `sql/10_equipment_actions.sql`: log a clean, swap a cylinder, log an extinguisher or defib check
 11. `sql/11_demos.sql`: the numbered demos (⋮ › Demo)
+12. `sql/12_clean_rota.sql`: the deep clean contractor's rota (a few days at each base in turn)
 
 Each should say "Success. No rows returned" (03 shows a number, which is fine).
-Files 08–11 are safe to run again.
+Files 08–12 are safe to run again.
 
 ## 2. Switch the new area on for the app (one-off)
 Supabase → **Project Settings** → **Data API**. Under **Exposed schemas**, add
