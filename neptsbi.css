@@ -359,6 +359,10 @@ body.panel-open { overflow: hidden; }
 .result-tile[aria-checked="true"][data-v="Pass"] .result-tile__icon { background: var(--ok-fill); border-color: var(--ok-fill); color: #fff; }
 .result-tile[aria-checked="true"][data-v="Fail"] { border: 2px solid var(--danger-text); background: var(--danger-soft); color: var(--danger-text); }
 .result-tile[aria-checked="true"][data-v="Fail"] .result-tile__icon { background: var(--danger-fill); border-color: var(--danger-fill); color: #fff; }
+/* Other choices (Replaced, which cylinder): selected = primary edge */
+.result-tile[aria-checked="true"]:not([data-v="Pass"]):not([data-v="Fail"]) { border: 2px solid var(--brand-fill); color: var(--text); }
+.result-tiles--list { grid-template-columns: 1fr; }
+.result-tiles--list .result-tile { justify-content: space-between; min-height: 48px; }
 .lf [hidden] { display: none !important; }
 
 /* Reg type-ahead list */

@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>neptsBI</title>
   <meta name="dougs-wallboard" content="on">
-  <!-- ?v=33 makes browsers fetch a matching set of files after each update -->
-  <link rel="stylesheet" href="dougs.css?v=33">
-  <link rel="stylesheet" href="neptsbi.css?v=33">
-  <script src="dougs.js?v=33"></script>
+  <!-- ?v=34 makes browsers fetch a matching set of files after each update -->
+  <link rel="stylesheet" href="dougs.css?v=34">
+  <link rel="stylesheet" href="neptsbi.css?v=34">
+  <script src="dougs.js?v=34"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="neptsbi.js?v=33"></script>
+  <script src="neptsbi.js?v=34"></script>
 </head>
 <body>
   <header class="app-header">
@@ -362,6 +362,7 @@
     const cyl = t => (t || "").replace(/ \(stretcher\)/g, " on stretcher");   // oxygen cylinder positions, for reading
     function vanSection(v, check) {
       const s = S(v, check), isSvc = check === "service", reg = esc(v.registration);
+      const actBtn = (kind, main, label) => `<button class="btn ${main ? "btn--primary" : "btn--ghost"}" type="button" data-eq="${reg}" data-kind="${kind}">${label}</button>`;
       const row = (k, val) => `<dt>${k}</dt><dd>${val}</dd>`;
       const inDate = s => s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date${s.items > 1 ? ` (${s.items_overdue} of ${s.items})` : ""}</span>`
         : s.status === "Due soon" ? `<span class="text-warn" style="font-weight:700">Due soon</span>` : '<span class="text-ok" style="font-weight:700">In date</span>';
@@ -371,7 +372,7 @@
           row("Last deep clean", NB.fmtDay(s.last_check)) +
           row("Due", `${NB.fmtDay(s.due_date)} <span class="muted">(every ${s.weeks} weeks)</span>`) +
           row("Contractor's next visit", NB.fmtDay(s.booking_date) + (s.booked ? "" : ' <span class="text-warn">– after it\'s due</span>')) +
-          `</dl>`, action: "" };
+          `</dl>`, action: canAct() ? actBtn("clean", s.status !== "OK", "Log extra clean") : "" };
       }
       if (check === "oxygen") {
         if (!s.items) return { facts: `<p class="muted">No oxygen on this van.</p>`, action: "" };
@@ -379,7 +380,7 @@
           row("On board", esc(cyl(s.positions))) +
           row("Status", s.status === "Overdue" ? `<span class="text-danger" style="font-weight:700">Out of date – ${esc(cyl(s.overdue_positions))}</span>` : inDate(s)) +
           row(s.status === "Overdue" ? "Ran out" : "First to run out", NB.fmtDay(s.due_date)) +
-          `</dl>`, action: "" };
+          `</dl>`, action: canAct() ? actBtn("oxygen", s.status !== "OK", "Swap cylinder") : "" };
       }
       if (check === "fire" || check === "defib") {
         if (!s.items) return { facts: `<p class="muted">No ${CHECK_NAME[check].toLowerCase()} recorded for this van.</p>`, action: "" };
@@ -391,7 +392,7 @@
           row("Last checked", NB.fmtDay(s.last_check)) +
           row("Due", NB.fmtDay(s.due_date)) +
           row("Next check day", NB.fmtDay(s.next_check_day) + (s.booked ? "" : ' <span class="text-warn">– after it runs out</span>')) +
-          `</dl>`, action: "" };
+          `</dl>`, action: canAct() ? actBtn(check, s.status !== "OK", "Log check") : "" };
       }
       const facts = isSvc
         ? row("Service", esc(svcWhat(s))) +
@@ -926,6 +927,7 @@
     // Buttons with data-book / data-log anywhere on a page
     function wireActions(root, check) {
       root.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBook(b.dataset.book, b.dataset.kind || check)));
+      root.querySelectorAll("[data-eq]").forEach(b => b.addEventListener("click", () => openEquip(b.dataset.eq, b.dataset.kind)));
       root.querySelectorAll("[data-log]").forEach(b => b.addEventListener("click", () => {
         if ((b.dataset.kind || check) === "service") location.hash = link("record-service", { reg: b.dataset.log, back: currentHash() });
         else openLogPanel(b.dataset.log);
@@ -1364,7 +1366,7 @@
         if (!d.value || d.value < today()) { err.textContent = "Pick a date from today on."; d.focus(); return; }
         if (d.value > NB.isoToday(120)) { err.textContent = "That's more than 4 months away – check the date."; d.focus(); return; }
         const where = f.querySelector("#bkWhere");
-        const args = { p_registration: reg, p_date: d.value, p_notes: f.querySelector("#bkNotes").value, p_person: m.person.code };
+        const args = { p_registration: reg, p_date: day, p_notes: f.querySelector("#bkNotes").value, p_person: m.person.code };
         if (isSvc) args.p_provider_id = +where.value; else args.p_centre_id = +where.value;
         const btn = f.querySelector("[type=submit]");
         btn.disabled = true; btn.textContent = "Booking…";
@@ -1374,6 +1376,82 @@
         p.close();
         render();
         toast(`Booked <strong>${esc(reg)}</strong> – ${isSvc ? "service" : retest ? "retest" : "MOT"} ${NB.fmtDay(d.value, true)} at ${esc(where.selectedOptions[0].textContent)}`);
+      });
+    }
+
+    // The one action for deep clean, oxygen, defib and extinguisher: a short form in the side panel
+    async function openEquip(reg, kind) {
+      const v = c.vehicleByReg.get(reg), s = S(v, kind);
+      const title = kind === "clean" ? "Log extra clean" : kind === "oxygen" ? "Swap cylinder" : `Log ${CHECK_NAME[kind].toLowerCase()} check`;
+      const p = NB.openPanel(title);
+      let cyls = [];
+      if (kind === "oxygen") {
+        p.el.innerHTML = `<div class="panel__body"><p class="muted">Loading…</p></div>`;
+        const r = await NB.db.from("equipment_items").select("id,position,expiry_date").eq("vehicle_id", v.id).eq("kind", "oxygen").eq("active", true).order("id");
+        if (r.error) { p.el.innerHTML = `<div class="panel__body"><div class="errbox">${esc(NB.friendlyError(r.error))}</div></div>`; return; }
+        const out = (s.overdue_positions || "").split(", ");
+        cyls = r.data.map(x => ({ ...x, out: out.includes(x.position) }));
+      }
+      const first = cyls.find(x => x.out) || cyls.slice().sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))[0];
+      const tiles = (name, opts, list) => `<div class="result-tiles${list ? " result-tiles--list" : ""}" role="radiogroup" aria-label="${name}">${opts.map(o =>
+        `<button type="button" class="result-tile" role="radio" data-v="${o.v}" aria-checked="${o.on}">${o.label}</button>`).join("")}</div>`;
+      const what = kind === "clean" ? `Deep clean due ${NB.fmtDay(s.due_date, true)}`
+        : kind === "oxygen" ? `${cyls.length} cylinders on board`
+        : `${s.items} ${kind === "fire" ? (s.items === 1 ? "extinguisher" : "extinguishers") : "defib"} · due ${NB.fmtDay(s.due_date, true)}`;
+      const dateField = (label, val) => `<div class="field"><label for="eqDate">${label}</label>
+            <input class="input" id="eqDate" inputmode="numeric" placeholder="dd/mm/yyyy" autocomplete="off" value="${val ? NB.toTyped(val) : ""}">
+            <div class="lf-hint" data-prev></div></div>`;
+      p.el.innerHTML = `<form novalidate style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="panel__body"><div class="lf">
+          <div><span class="reg" style="font-size:1.05rem">${esc(reg)}</span><div class="lf-hint">${what}</div></div>
+          ${kind === "oxygen"
+            ? `<div class="field"><span class="label">Which cylinder</span>${tiles("Which cylinder", cyls.map(x => ({ v: x.id, on: x === first,
+                label: `${esc(cyl(x.position))}<span class="small ${x.out ? "text-danger" : "muted"}" style="font-weight:${x.out ? 700 : 400}">${x.out ? "Out of date" : "Runs out " + NB.fmtDay(x.expiry_date, true)}</span>` })), true)}</div>
+               ${dateField("New cylinder runs out", "")}`
+            : kind === "clean"
+            ? `${dateField("Cleaned on", today())}
+               <div class="field"><label for="eqNotes">Why <span class="muted">(optional)</span></label>
+                 <input class="input" id="eqNotes" type="text" maxlength="500" placeholder="e.g. after an infectious patient"></div>`
+            : `<div class="field"><span class="label">Result</span>${tiles("Result", [{ v: "Pass", on: true, label: "Checked – OK" }, { v: "Replaced", on: false, label: "Replaced" }])}</div>
+               ${dateField("Checked on", today())}`}
+          <div class="errbox" data-err role="alert"></div>
+        </div></div>
+        <div class="panel__foot"><button class="btn btn--primary" type="submit">Save</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div>
+      </form>`;
+      const f = p.el.querySelector("form"), d = f.querySelector("#eqDate");
+      const iso = () => NB.parseTyped(d.value);   // "" empty, null not a date
+      const prev = () => {
+        const el = f.querySelector("[data-prev]"), x = iso();
+        el.className = x === null ? "lf-hint lf-hint--bad" : "lf-hint";
+        el.textContent = x === null ? "Not a date – type it as dd/mm/yyyy" : x ? NB.fmtDay(x) + (x === today() ? " – today" : "") : "";
+      };
+      d.addEventListener("input", prev); prev();
+      f.querySelectorAll(".result-tiles").forEach(g => g.querySelectorAll(".result-tile").forEach(b => b.addEventListener("click", () =>
+        g.querySelectorAll(".result-tile").forEach(x => x.setAttribute("aria-checked", String(x === b))))));
+      const picked = () => { const b = f.querySelector('.result-tile[aria-checked="true"]'); return b && b.dataset.v; };
+      f.querySelector("[data-cancel]").addEventListener("click", p.close);
+      (kind === "oxygen" ? d : f.querySelector("[type=submit]")).focus();
+      f.addEventListener("submit", async e => {
+        e.preventDefault();
+        const err = f.querySelector("[data-err]");
+        err.textContent = "";
+        const day = iso();
+        if (!day) { err.textContent = kind === "oxygen" ? "Type the date from the new cylinder's label, as dd/mm/yyyy." : "Type the date as dd/mm/yyyy."; d.focus(); return; }
+        if (kind === "oxygen" && day <= today()) { err.textContent = "The new cylinder must run out after today – check the label."; d.focus(); return; }
+        if (kind !== "oxygen" && (day > today() || day < NB.isoToday(-30))) { err.textContent = "It must be a date in the last 30 days."; d.focus(); return; }
+        const who = m.person.code;
+        const call = kind === "clean" ? NB.db.rpc("log_deep_clean", { p_registration: reg, p_date: day, p_notes: f.querySelector("#eqNotes").value, p_person: who })
+          : kind === "oxygen" ? NB.db.rpc("swap_oxygen", { p_item_id: +picked(), p_new_expiry: day, p_person: who })
+          : NB.db.rpc("log_equipment_check", { p_registration: reg, p_kind: kind, p_date: day, p_result: picked(), p_person: who });
+        const btn = f.querySelector("[type=submit]");
+        btn.disabled = true; btn.textContent = "Saving…";
+        const r = await call;
+        if (r.error) { err.textContent = NB.friendlyError(r.error); btn.disabled = false; btn.textContent = "Save"; return; }
+        await reload();
+        p.close();
+        render();
+        const done = S(c.vehicleByReg.get(reg), kind);
+        toast(`<strong>${esc(reg)}</strong> – ${kind === "clean" ? "deep clean logged" : kind === "oxygen" ? "cylinder swapped" : CHECK_NAME[kind].toLowerCase() + " check logged"}${done && done.due_date ? ` · next due ${NB.fmtDay(done.due_date, true)}` : ""}`);
       });
     }
 

@@ -16,9 +16,10 @@ Run these files **in order**: open each one, copy everything, paste it into
 7. `sql/07_vor.sql`: the VOR (vehicle off road) rule
 8. `sql/08_equipment.sql`: fire extinguishers, defibs and the demo story switch
 9. `sql/09_cleans_oxygen.sql`: deep cleans and oxygen cylinders
+10. `sql/10_equipment_actions.sql`: log a clean, swap a cylinder, log an extinguisher or defib check
 
 Each should say "Success. No rows returned" (03 shows a number, which is fine).
-Files 08 and 09 are safe to run again.
+Files 08–10 are safe to run again.
 
 ## 2. Switch the new area on for the app (one-off)
 Supabase → **Project Settings** → **Data API**. Under **Exposed schemas**, add
